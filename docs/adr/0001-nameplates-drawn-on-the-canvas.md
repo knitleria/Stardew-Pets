@@ -4,4 +4,4 @@ The farm view is a single double-buffered canvas of sprites; until now no text w
 
 ## Consequences
 
-Nameplates inherit canvas behaviour: they scale with the pets and are clipped by the canvas bounds. Text rendering is ours to handle, including truncation and any glyph the font lacks, with no CSS fallback available.
+Nameplates inherit canvas behaviour: they scale with the pets and are clipped by the canvas bounds at the sides, while at the top the drawing code floors the anchor, so a pet standing against the top edge of the farm wears its name over its own sprite rather than losing it off the canvas. Text rendering is ours to handle, including truncation and any glyph the font lacks, with no CSS fallback available.

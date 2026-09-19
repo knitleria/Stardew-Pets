@@ -4,6 +4,8 @@
 
 **Goal:** Draw every Pet's Name above it in the farm view, with a setting to turn the Nameplates off.
 
+**Status:** The code is complete and committed. The visual verification — every "Look at it" step below — is still outstanding, so those steps stay unticked.
+
 **Architecture:** The farm view is a webview running a canvas game loop. `PetCharacter.draw` already draws the sprite and then asks its AI to draw a mood emote on top; the Nameplate slots into that same method as a `fillText` call in game units, so it scales with the pets for free. A new `stardew-pets.showNames` setting travels from the extension host to the webview as a message, exactly like the existing `background`, `scale` and `monsters` settings.
 
 **Tech Stack:** TypeScript (strict), esbuild, VS Code webview API, Canvas 2D.
@@ -38,9 +40,9 @@ To pick up a change without restarting, rebuild with `npm run build-game` and ru
 - Produces: `PetAI.moodElevation: number` — how far above (negative) or below (positive) the sprite's top edge this specie's emote hangs.
 - Produces: `PetCharacter.nameFontSize: number`, `PetCharacter.nameGap: number` — static constants later tasks reuse.
 
-> **Amended after review.** `#drawName` originally returned the height it used, for Task 3 to lift the emote by. Task 3 was dropped, so the method returns nothing.
+> **Amended after review.** `#drawName` originally returned the height it used, for Task 3 to lift the emote by. Task 3 was dropped, so the method returns nothing. The snippet in Step 3 shows the method as it finally shipped, which includes the vertical clamp, the truncation Task 2 adds and the `showNames` guard Task 4 adds.
 
-- [ ] **Step 1: Expose the mood elevation from the AI**
+- [x] **Step 1: Expose the mood elevation from the AI**
 
 Every specie has its own `moodElevation` because sprites have different amounts of transparent padding, and the Nameplate has to hang off the same anchor as the emote or it will float in empty space above a short pet.
 
@@ -50,7 +52,7 @@ In `src/game/entities/pets.ts`, inside `class PetAI`, directly below the private
     get moodElevation(): number { return this.#moodElevation; }
 ```
 
-- [ ] **Step 2: Add the Nameplate constants**
+- [x] **Step 2: Add the Nameplate constants**
 
 In `src/game/entities/pets.ts`, inside `class PetCharacter`, directly below the `get color(): string { return this.#color; }` line, add:
 
@@ -60,7 +62,7 @@ In `src/game/entities/pets.ts`, inside `class PetCharacter`, directly below the 
     static nameGap: number = 2;
 ```
 
-- [ ] **Step 3: Draw the Nameplate**
+- [x] **Step 3: Draw the Nameplate**
 
 Still in `class PetCharacter`, replace the whole `draw` method:
 
@@ -79,7 +81,7 @@ with:
 
 ```ts
     //Rendering
-    draw(ctx: CanvasRenderingContext2D, options: any) {
+    draw(ctx: CanvasRenderingContext2D, options: any = {}) {
         //Draw character
         super.draw(ctx, options);
 
@@ -94,10 +96,21 @@ with:
     }
 
     #drawName(ctx: CanvasRenderingContext2D) {
-        //Get text & position
-        const text = this.name;
+        //Names are hidden
+        if (!Game.showNames) return;
+
+        //Get text
+        const text = Util.truncate(Util.stripAccents(this.name), PetCharacter.nameMaxChars);
+
+        //Nothing to draw
+        if (!text) return;
+
+        //Get position
         const x = Math.round(this.pos.x + this.size.x / 2);
-        const y = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
+        const yAnchor = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
+
+        //Keep the name on canvas (bottom baseline -> the text extends one font size above y)
+        const y = Math.max(yAnchor, PetCharacter.nameFontSize);
 
         //Draw text with an outline so it reads on any background
         ctx.save();
@@ -115,16 +128,16 @@ with:
 
 The early return matters: `GameObject.isPosInSprite` re-runs `draw` on a scratch canvas to decide whether a click hit an opaque pixel, and it passes `options.pos`. Text must not take part in that.
 
-- [ ] **Step 4: Make sure the font is loaded before the first frame**
+- [x] **Step 4: Make sure the font is loaded before the first frame**
 
 Canvas text does not trigger font loading the way DOM text does, so the first frames can render in a fallback font. In `src/game/engine.ts`, in `Game.start`, directly after the three `getContext` lines, add:
 
 ```ts
         //Preload the pet name font (canvas text does not trigger font loading on its own)
-        document.fonts.load('8px Stardew');
+        document.fonts.load('8px Stardew').catch(() => {});
 ```
 
-- [ ] **Step 5: Typecheck**
+- [x] **Step 5: Typecheck**
 
 Run: `npm run compile`
 Expected: no output, exit code 0.
@@ -137,7 +150,9 @@ Expected: each pet carries its name in white with a dark outline, sitting just a
 
 Check all three values of `stardew-pets.scale` (Small, Medium, Big). The text is drawn in game units and magnified by the same CSS transform as the sprites, so it should grow with them and stay crisp-edged. If the text is illegible at Small, change `nameFontSize` to `7` or `9` and rebuild — do not reach for a DOM overlay, that path is closed by ADR-0001.
 
-- [ ] **Step 7: Commit**
+Note: a pet that walks to the very top of the farm gets its name pushed down onto its own sprite, because the clamp floors the baseline rather than letting the text run off the canvas. The project owner looked at this and chose to keep it, rather than flip the name below the pet when it runs out of room above.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/game/entities/pets.ts src/game/engine.ts
@@ -156,7 +171,7 @@ git commit -m "feat: draw pet names above pets"
 - Consumes: `PetCharacter.#drawName` from Task 1.
 - Produces: `Util.truncate(text: string, max: number): string`, `PetCharacter.nameMaxChars: number`.
 
-- [ ] **Step 1: Add the helper**
+- [x] **Step 1: Add the helper**
 
 Twitch display names run to 25 characters, which is wider than any pet and wide enough to cover its neighbours. In `src/game/util.ts`, inside `class Util`, directly below `titleCase`, add:
 
@@ -170,7 +185,7 @@ Twitch display names run to 25 characters, which is wider than any pet and wide 
     }
 ```
 
-- [ ] **Step 2: Add the limit constant**
+- [x] **Step 2: Add the limit constant**
 
 In `src/game/entities/pets.ts`, in `class PetCharacter`, extend the constants added in Task 1 so the block reads:
 
@@ -181,7 +196,7 @@ In `src/game/entities/pets.ts`, in `class PetCharacter`, extend the constants ad
     static nameMaxChars: number = 12;
 ```
 
-- [ ] **Step 3: Use it**
+- [x] **Step 3: Use it**
 
 In `#drawName`, replace:
 
@@ -197,7 +212,7 @@ with:
 
 `Util` is already imported in this file.
 
-- [ ] **Step 4: Typecheck**
+- [x] **Step 4: Typecheck**
 
 Run: `npm run compile`
 Expected: no output, exit code 0.
@@ -208,7 +223,7 @@ Press <kbd>F5</kbd>, run `Add pet`, and give the pet the name `Verylongstreamer`
 
 Expected: the Nameplate reads `Verylongst..` — ten characters and two dots.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/game/util.ts src/game/entities/pets.ts
@@ -243,7 +258,7 @@ Consequence carried into Task 1 and Task 4: `#drawName` returns nothing, because
 - Consumes: `PetCharacter.#drawName` from Task 1.
 - Produces: `Game.showNames: boolean`, `Game.setShowNames(showNames: boolean): void`, and a `shownames` webview message carrying `{ type: 'shownames', value: boolean }`.
 
-- [ ] **Step 1: Declare the setting**
+- [x] **Step 1: Declare the setting**
 
 In `package.json`, inside `contributes.configuration.properties`, after the `stardew-pets.monsters` block, add a comma and:
 
@@ -255,7 +270,7 @@ In `package.json`, inside `contributes.configuration.properties`, after the `sta
                 }
 ```
 
-- [ ] **Step 2: Send it when the farm loads**
+- [x] **Step 2: Send it when the farm loads**
 
 In `src/extension.ts`, in `initGame`, after the monsters toggle block and before the money block, add:
 
@@ -267,7 +282,7 @@ In `src/extension.ts`, in `initGame`, after the monsters toggle block and before
     });
 ```
 
-- [ ] **Step 3: Send it when it changes**
+- [x] **Step 3: Send it when it changes**
 
 In `src/extension.ts`, in the `vscode.workspace.onDidChangeConfiguration` callback, after the monsters block, add:
 
@@ -281,7 +296,7 @@ In `src/extension.ts`, in the `vscode.workspace.onDidChangeConfiguration` callba
         }
 ```
 
-- [ ] **Step 4: Hold the flag in the game**
+- [x] **Step 4: Hold the flag in the game**
 
 In `src/game/engine.ts`, in `class Game`, directly after the `setScale` arrow function, add:
 
@@ -297,7 +312,7 @@ In `src/game/engine.ts`, in `class Game`, directly after the `setScale` arrow fu
     }
 ```
 
-- [ ] **Step 5: Receive the message**
+- [x] **Step 5: Receive the message**
 
 In `src/game/main.ts`, in the `switch (message.type.toLowerCase())` block, after the `monsters` case, add:
 
@@ -310,7 +325,7 @@ In `src/game/main.ts`, in the `switch (message.type.toLowerCase())` block, after
 
 The switch lowercases the type, which is why the case is `shownames` and not `showNames`.
 
-- [ ] **Step 6: Honour the flag**
+- [x] **Step 6: Honour the flag**
 
 In `src/game/entities/pets.ts`, make `#drawName` bail out first. Its opening becomes:
 
@@ -323,7 +338,7 @@ In `src/game/entities/pets.ts`, make `#drawName` bail out first. Its opening bec
         const text = Util.truncate(this.name, PetCharacter.nameMaxChars);
 ```
 
-- [ ] **Step 7: Document it**
+- [x] **Step 7: Document it**
 
 `README.md` has no list of settings; each feature mentions its own in prose, the way the Monsters section says "You can disable monsters in settings if you don't want them to appear." Follow that. In the `## Pets` section, replace:
 
@@ -340,7 +355,7 @@ Each pet's name is shown above it, and you can hide the names in settings.
 
 Keep the two trailing spaces: this file uses them for line breaks.
 
-- [ ] **Step 8: Typecheck**
+- [x] **Step 8: Typecheck**
 
 Run: `npm run compile`
 Expected: no output, exit code 0.
@@ -353,7 +368,7 @@ Expected: **Show names** is present and checked, names are visible. Uncheck it: 
 
 Then close and reopen the farm view with the setting off, and confirm the names stay off — that proves Step 2 wired `initGame`, not just the watcher.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add package.json src/extension.ts src/game/main.ts src/game/engine.ts src/game/entities/pets.ts README.md
