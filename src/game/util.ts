@@ -186,6 +186,11 @@ export class Util {
         return `${text.substring(0, max - 2)}..`;
     }
 
+    static stripAccents(text: string) {
+        //Split accented letters into letter + accent, then drop the accents (the pixel font has neither)
+        return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+
 }
 
 //Array extensions

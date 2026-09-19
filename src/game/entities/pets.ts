@@ -681,7 +681,7 @@ export class PetCharacter extends Character<PetAI> {
     }
 
     //Rendering
-    draw(ctx: CanvasRenderingContext2D, options: any) {
+    draw(ctx: CanvasRenderingContext2D, options: any = {}) {
         //Draw character
         super.draw(ctx, options);
 
@@ -699,8 +699,13 @@ export class PetCharacter extends Character<PetAI> {
         //Names are hidden
         if (!Game.showNames) return;
 
-        //Get text & position
-        const text = Util.truncate(this.name, PetCharacter.nameMaxChars);
+        //Get text
+        const text = Util.truncate(Util.stripAccents(this.name), PetCharacter.nameMaxChars);
+
+        //Nothing to draw
+        if (!text) return;
+
+        //Get position
         const x = Math.round(this.pos.x + this.size.x / 2);
         const yAnchor = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
 

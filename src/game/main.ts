@@ -265,7 +265,7 @@ window.addEventListener('message', (event) => {
 
         //Update names toggle
         case 'shownames':
-            Game.setShowNames(message.value === true);
+            Game.setShowNames(message.value !== false);
             break;
 
         //
