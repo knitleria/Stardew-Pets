@@ -698,7 +698,10 @@ export class PetCharacter extends Character<PetAI> {
         //Get text & position
         const text = this.name;
         const x = Math.round(this.pos.x + this.size.x / 2);
-        const y = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
+        const yAnchor = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
+
+        //Keep the name on canvas (bottom baseline -> the text extends one font size above y)
+        const y = Math.max(yAnchor, PetCharacter.nameFontSize);
 
         //Draw text with an outline so it reads on any background
         ctx.save();
