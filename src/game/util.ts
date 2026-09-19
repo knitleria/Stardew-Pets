@@ -182,8 +182,8 @@ export class Util {
         //Short enough -> Leave it alone
         if (text.length <= max) return text;
 
-        //Too long -> Cut it and mark the cut
-        return `${text.substring(0, max - 1)}…`;
+        //Too long -> Cut it and mark the cut (the pixel font has no … glyph)
+        return `${text.substring(0, max - 2)}..`;
     }
 
 }
