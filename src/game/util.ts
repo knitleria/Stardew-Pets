@@ -178,6 +178,14 @@ export class Util {
         return parts.join(' ');
     }
 
+    static truncate(text: string, max: number) {
+        //Short enough -> Leave it alone
+        if (text.length <= max) return text;
+
+        //Too long -> Cut it and mark the cut
+        return `${text.substring(0, max - 1)}…`;
+    }
+
 }
 
 //Array extensions

@@ -641,6 +641,7 @@ export class PetCharacter extends Character<PetAI> {
     //Name plate
     static nameFontSize: number = 8;
     static nameGap: number = 2;
+    static nameMaxChars: number = 12;
 
 
     //Constructor
@@ -696,7 +697,7 @@ export class PetCharacter extends Character<PetAI> {
 
     #drawName(ctx: CanvasRenderingContext2D): number {
         //Get text & position
-        const text = this.name;
+        const text = Util.truncate(this.name, PetCharacter.nameMaxChars);
         const x = Math.round(this.pos.x + this.size.x / 2);
         const yAnchor = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
 
