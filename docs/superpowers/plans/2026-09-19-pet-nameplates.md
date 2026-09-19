@@ -38,6 +38,8 @@ To pick up a change without restarting, rebuild with `npm run build-game` and ru
 - Produces: `PetAI.moodElevation: number` — how far above (negative) or below (positive) the sprite's top edge this specie's emote hangs.
 - Produces: `PetCharacter.nameFontSize: number`, `PetCharacter.nameGap: number` — static constants later tasks reuse.
 
+> **Amended after review.** `#drawName` originally returned the height it used, for Task 3 to lift the emote by. Task 3 was dropped, so the method returns nothing.
+
 - [ ] **Step 1: Expose the mood elevation from the AI**
 
 Every specie has its own `moodElevation` because sprites have different amounts of transparent padding, and the Nameplate has to hang off the same anchor as the emote or it will float in empty space above a short pet.
@@ -91,7 +93,7 @@ with:
         this.ai.drawMood(ctx);
     }
 
-    #drawName(ctx: CanvasRenderingContext2D): number {
+    #drawName(ctx: CanvasRenderingContext2D) {
         //Get text & position
         const text = this.name;
         const x = Math.round(this.pos.x + this.size.x / 2);
@@ -108,9 +110,6 @@ with:
         ctx.strokeText(text, x, y);
         ctx.fillText(text, x, y);
         ctx.restore();
-
-        //Height taken by the name
-        return PetCharacter.nameFontSize + PetCharacter.nameGap;
     }
 ```
 
@@ -166,8 +165,8 @@ Twitch display names run to 25 characters, which is wider than any pet and wide 
         //Short enough -> Leave it alone
         if (text.length <= max) return text;
 
-        //Too long -> Cut it and mark the cut
-        return `${text.substring(0, max - 1)}…`;
+        //Too long -> Cut it and mark the cut (the pixel font has no … glyph)
+        return `${text.substring(0, max - 2)}..`;
     }
 ```
 
@@ -218,82 +217,15 @@ git commit -m "feat: truncate long pet names on the nameplate"
 
 ---
 
-### Task 3: Lift the emote above the Nameplate
+### Task 3: Lift the emote above the Nameplate — DROPPED
 
-**Files:**
-- Modify: `src/game/entities/pets.ts` (`PetAI.drawMood`, `PetCharacter.draw`)
+**Do not implement this task.** It was written on a false premise and dropped after review; it is kept here so the numbering in the ledger and the commit history still lines up.
 
-**Interfaces:**
-- Consumes: `PetCharacter.#drawName` returning the height it used, from Task 1.
-- Produces: `PetAI.drawMood(ctx: CanvasRenderingContext2D, offset?: number): void`.
+The premise was that the emote and the Nameplate collide. They do not. `ctx.drawImage` anchors the emote by its top edge while the Nameplate is drawn with `textBaseline = 'bottom'`, so with the anchor at `e = pos.y + moodElevation`, the name occupies `[e - 10, e - 2]` and the emote `[e, e + 9]` — the emote sits on the pet's head and the name floats above it, already clear.
 
-The emote and the Nameplate currently both anchor to `pos.y + moodElevation`, so clicking a pet draws the emote straight through its name.
+The original fix shifted the emote up by exactly the Nameplate's height, which moved it onto the name and made it paint over the text — the opposite of the intent. Rather than shift by the name's height plus the emote's own, the project owner chose to leave the emote where it has always been.
 
-- [ ] **Step 1: Let the emote take an offset**
-
-In `src/game/entities/pets.ts`, in `class PetAI`, change the signature and the y coordinate of `drawMood`:
-
-```ts
-    drawMood(ctx: CanvasRenderingContext2D, offset: number = 0) {
-        //Mood is hidden
-        if (!this.#moodShow) return;
-
-        //Draw mood
-        ctx.drawImage(
-            this.#moodSprite,
-            this.#moodOffset.x,
-            this.#moodOffset.y,
-            PetMoods.size.x,
-            PetMoods.size.y,
-            this.character.pos.x + Math.round((this.character.size.x - PetMoods.size.x) / 2),
-            this.character.pos.y + this.#moodElevation + offset,
-            PetMoods.size.x,
-            PetMoods.size.y
-        );
-    }
-```
-
-- [ ] **Step 2: Pass the Nameplate height**
-
-In `class PetCharacter`, change the tail of `draw` from:
-
-```ts
-        //Draw name
-        this.#drawName(ctx);
-
-        //Draw AI mood
-        this.ai.drawMood(ctx);
-```
-
-to:
-
-```ts
-        //Draw name & find out how much room it took
-        const nameHeight = this.#drawName(ctx);
-
-        //Draw AI mood above the name
-        this.ai.drawMood(ctx, -nameHeight);
-```
-
-Negative is up: `PetAI` stores `#moodElevation` already inverted.
-
-- [ ] **Step 3: Typecheck**
-
-Run: `npm run compile`
-Expected: no output, exit code 0.
-
-- [ ] **Step 4: Look at it**
-
-Press <kbd>F5</kbd> and click a pet to make its emote appear.
-
-Expected: the emote floats clear above the Nameplate, and the name stays fully readable. Try a tall pet (Dino, Ostrich) and a flat one (Cat, Turtle) — both use the same anchor, so both should clear.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/game/entities/pets.ts
-git commit -m "feat: raise pet emotes above nameplates"
-```
+Consequence carried into Task 1 and Task 4: `#drawName` returns nothing, because nothing consumes a height any more.
 
 ---
 
@@ -383,15 +315,13 @@ The switch lowercases the type, which is why the case is `shownames` and not `sh
 In `src/game/entities/pets.ts`, make `#drawName` bail out first. Its opening becomes:
 
 ```ts
-    #drawName(ctx: CanvasRenderingContext2D): number {
+    #drawName(ctx: CanvasRenderingContext2D) {
         //Names are hidden
-        if (!Game.showNames) return 0;
+        if (!Game.showNames) return;
 
         //Get text & position
         const text = Util.truncate(this.name, PetCharacter.nameMaxChars);
 ```
-
-Returning `0` is what keeps the emote from floating when Nameplates are off.
 
 - [ ] **Step 7: Document it**
 
@@ -419,7 +349,7 @@ Expected: no output, exit code 0.
 
 Press <kbd>F5</kbd>, then in the Extension Development Host open `Stardew Pets Settings` from the view's title bar.
 
-Expected: **Show names** is present and checked, names are visible. Uncheck it: every Nameplate disappears immediately, with no reload, and emotes drop back to hugging the sprites. Check it again: they come back.
+Expected: **Show names** is present and checked, names are visible. Uncheck it: every Nameplate disappears immediately, with no reload. Check it again: they come back. The mood emotes do not move either way — Task 3, which would have moved them, was dropped.
 
 Then close and reopen the farm view with the setting off, and confirm the names stay off — that proves Step 2 wired `initGame`, not just the watcher.
 
