@@ -584,7 +584,7 @@ export class PetAI extends AI {
         this.#moodHideTimeout.wait(2000);
     }
 
-    drawMood(ctx: CanvasRenderingContext2D) {
+    drawMood(ctx: CanvasRenderingContext2D, offset: number = 0) {
         //Mood is hidden
         if (!this.#moodShow) return;
 
@@ -596,7 +596,7 @@ export class PetAI extends AI {
             PetMoods.size.x,
             PetMoods.size.y,
             this.character.pos.x + Math.round((this.character.size.x - PetMoods.size.x) / 2),
-            this.character.pos.y + this.#moodElevation,
+            this.character.pos.y + this.#moodElevation + offset,
             PetMoods.size.x,
             PetMoods.size.y
         );
@@ -688,11 +688,11 @@ export class PetCharacter extends Character<PetAI> {
         //Drawing into the alpha test canvas -> Nothing above the sprite counts as clickable
         if (typeof options === 'object' && typeof options.pos === 'object') return;
 
-        //Draw name
-        this.#drawName(ctx);
+        //Draw name & find out how much room it took
+        const nameHeight = this.#drawName(ctx);
 
-        //Draw AI mood
-        this.ai.drawMood(ctx);
+        //Draw AI mood above the name
+        this.ai.drawMood(ctx, -nameHeight);
     }
 
     #drawName(ctx: CanvasRenderingContext2D): number {
