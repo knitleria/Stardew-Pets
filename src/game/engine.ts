@@ -855,6 +855,9 @@ export class Game {
         this.#contextBuffer = this.canvasBuffer.getContext('2d', { willReadFrequently: true })!;
         this.#contextAlphaTest = this.canvasAlphaTest.getContext('2d', { willReadFrequently: true })!;
 
+        //Preload the pet name font (canvas text does not trigger font loading on its own)
+        document.fonts.load('8px Stardew');
+
         //Create ball
         this.#ball = new Ball();
 

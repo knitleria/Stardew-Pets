@@ -520,6 +520,8 @@ export class PetAI extends AI {
     #moodHideTimeout: Timeout = new Timeout(() => this.#moodShow = false);
     #moodHeartTimeout: Timeout = new Timeout(() => this.#setRandomMood());
 
+    get moodElevation(): number { return this.#moodElevation; }
+
 
     //State
     constructor(config: any) {
@@ -636,6 +638,10 @@ export class PetCharacter extends Character<PetAI> {
     get specie(): string { return this.#specie; }
     get color(): string { return this.#color; }
 
+    //Name plate
+    static nameFontSize: number = 8;
+    static nameGap: number = 2;
+
 
     //Constructor
     constructor(name: string, specie: string, color: string, config: any = {}, config_ai: any = {}) {
@@ -678,8 +684,36 @@ export class PetCharacter extends Character<PetAI> {
         //Draw character
         super.draw(ctx, options);
 
+        //Drawing into the alpha test canvas -> Nothing above the sprite counts as clickable
+        if (typeof options === 'object' && typeof options.pos === 'object') return;
+
+        //Draw name
+        this.#drawName(ctx);
+
         //Draw AI mood
         this.ai.drawMood(ctx);
+    }
+
+    #drawName(ctx: CanvasRenderingContext2D): number {
+        //Get text & position
+        const text = this.name;
+        const x = Math.round(this.pos.x + this.size.x / 2);
+        const y = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
+
+        //Draw text with an outline so it reads on any background
+        ctx.save();
+        ctx.font = `${PetCharacter.nameFontSize}px Stardew`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#2b1b10';
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeText(text, x, y);
+        ctx.fillText(text, x, y);
+        ctx.restore();
+
+        //Height taken by the name
+        return PetCharacter.nameFontSize + PetCharacter.nameGap;
     }
 
     //Movement
