@@ -159,6 +159,12 @@ function initGame() {
         value: config.get('monsters')
     });
 
+    //Send names toggle
+    webview.postMessage({
+        type: 'shownames',
+        value: config.get('showNames')
+    });
+
     //Send money
     webview.postMessage({
         type: 'money',
@@ -382,6 +388,14 @@ export function activate(context: vscode.ExtensionContext) {
             webview.postMessage({
                 type: 'monsters',
                 value: config.get('monsters')
+            })
+        }
+
+        //Names toggle changed
+        if (event.affectsConfiguration("stardew-pets.showNames")) {
+            webview.postMessage({
+                type: 'shownames',
+                value: config.get('showNames')
             })
         }
     })

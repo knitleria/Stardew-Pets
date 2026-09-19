@@ -696,6 +696,9 @@ export class PetCharacter extends Character<PetAI> {
     }
 
     #drawName(ctx: CanvasRenderingContext2D) {
+        //Names are hidden
+        if (!Game.showNames) return;
+
         //Get text & position
         const text = Util.truncate(this.name, PetCharacter.nameMaxChars);
         const x = Math.round(this.pos.x + this.size.x / 2);

@@ -659,6 +659,16 @@ export class Game {
         this.onResize();
     }
 
+    //Pet names
+    static #showNames: boolean = true;
+
+    static get showNames(): boolean { return this.#showNames; }
+
+    static setShowNames = (showNames: boolean) => {
+        //Update names toggle
+        this.#showNames = showNames;
+    }
+
     static onResize = () => {
         //Update game window size
         this.#windowSize = new Vec2(window.innerWidth, window.innerHeight);

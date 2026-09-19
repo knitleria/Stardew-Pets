@@ -263,6 +263,11 @@ window.addEventListener('message', (event) => {
             }
             break;
 
+        //Update names toggle
+        case 'shownames':
+            Game.setShowNames(message.value === true);
+            break;
+
         //
         // Game objects
         //

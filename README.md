@@ -11,6 +11,7 @@ Keep your favourite **Stardew Valley** pets with you while coding.
 ## Pets
 
 You can have pets with custom names to keep you company while coding.  
+Each pet's name is shown above it, and you can hide the names in settings.  
 
 <details>
     <summary style="cursor: pointer">
