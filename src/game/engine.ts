@@ -718,6 +718,7 @@ export class Game {
     static #context: CanvasRenderingContext2D;
     static #contextBuffer: CanvasRenderingContext2D;
     static #contextAlphaTest: CanvasRenderingContext2D;
+    static #nameplates: HTMLElement = document.getElementById('nameplates') as HTMLElement;
 
     static get background(): HTMLElement { return this.#background; }
     static get canvas(): HTMLCanvasElement { return this.#canvas; }
@@ -726,6 +727,7 @@ export class Game {
     static get context(): CanvasRenderingContext2D { return this.#context; }
     static get contextBuffer(): CanvasRenderingContext2D { return this.#contextBuffer; }
     static get contextAlphaTest(): CanvasRenderingContext2D { return this.#contextAlphaTest; }
+    static get nameplates(): HTMLElement { return this.#nameplates; }
 
     static draw = () => {
         //Clear canvas
@@ -748,6 +750,9 @@ export class Game {
             //Draw object
             obj.draw(this.contextBuffer);
         }
+
+        //Draw sharp pet names in the unscaled DOM layer
+        for (const pet of this.pets) pet.updateNameplate(!inDecorMode && pet.active && this.showNames);
 
         //Draw double bufffer into real canvas
         this.canvas.width = this.canvasBuffer.width;
@@ -865,9 +870,6 @@ export class Game {
         this.#contextBuffer = this.canvasBuffer.getContext('2d', { willReadFrequently: true })!;
         this.#contextAlphaTest = this.canvasAlphaTest.getContext('2d', { willReadFrequently: true })!;
 
-        //Preload the pet name font (canvas text does not trigger font loading on its own)
-        document.fonts.load('8px Stardew').catch(() => {});
-
         //Create ball
         this.#ball = new Ball();
 
@@ -880,6 +882,7 @@ export class Game {
         //Remove pets
         for (const pet of Game.pets) Game.objects.removeItem(pet);
         this.#pets = [];
+        this.nameplates.replaceChildren();
 
         //Remove decor
         for (const decor of Game.decoration) Game.objects.removeItem(decor);

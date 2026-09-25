@@ -639,9 +639,8 @@ export class PetCharacter extends Character<PetAI> {
     get color(): string { return this.#color; }
 
     //Name plate
-    static nameFontSize: number = 8;
     static nameGap: number = 2;
-    static nameMaxChars: number = 12;
+    #nameplate: HTMLSpanElement = document.createElement('span');
 
 
     //Constructor
@@ -657,6 +656,12 @@ export class PetCharacter extends Character<PetAI> {
         this.#specie = specie;
         this.#color = color;
 
+        //Create name plate outside the scaled game canvas
+        this.#nameplate.classList.add('petNameplate');
+        this.#nameplate.innerText = this.name;
+        this.#nameplate.setAttribute('aria-hidden', 'true');
+        Game.nameplates.append(this.#nameplate);
+
         //Move towards random point
         this.ai.moveTowardsRandom();
 
@@ -669,6 +674,9 @@ export class PetCharacter extends Character<PetAI> {
 
         //Remove from pets list
         Game.pets.removeItem(this);
+
+        //Remove name plate
+        this.#nameplate.remove();
     }
 
     //Clicks
@@ -688,41 +696,34 @@ export class PetCharacter extends Character<PetAI> {
         //Drawing into the alpha test canvas -> Nothing above the sprite counts as clickable
         if (typeof options === 'object' && typeof options.pos === 'object') return;
 
-        //Draw name
-        this.#drawName(ctx);
-
         //Draw AI mood
         this.ai.drawMood(ctx);
     }
 
-    #drawName(ctx: CanvasRenderingContext2D) {
-        //Names are hidden
-        if (!Game.showNames) return;
+    updateNameplate(show: boolean) {
+        this.#nameplate.hidden = !show || !this.name;
+        if (this.#nameplate.hidden) return;
 
-        //Get text
-        const text = Util.truncate(Util.stripAccents(this.name), PetCharacter.nameMaxChars);
+        //Convert the pet's game coordinates into unscaled screen coordinates
+        const xAnchor = Math.round((this.pos.x + this.size.x / 2) * Game.scale);
+        const yAnchor = Math.round((this.pos.y + this.ai.moodElevation - PetCharacter.nameGap) * Game.scale);
 
-        //Nothing to draw
-        if (!text) return;
+        //Keep the complete name plate on screen and on whole pixels
+        const width = this.#nameplate.offsetWidth;
+        const height = this.#nameplate.offsetHeight;
+        const left = Util.clamp(
+            Math.round(xAnchor - width / 2),
+            0,
+            Math.max(0, Game.windowSize.x - width)
+        );
+        const top = Util.clamp(
+            yAnchor - height,
+            0,
+            Math.max(0, Game.windowSize.y - height)
+        );
 
-        //Get position
-        const x = Math.round(this.pos.x + this.size.x / 2);
-        const yAnchor = Math.round(this.pos.y + this.ai.moodElevation - PetCharacter.nameGap);
-
-        //Keep the name on canvas (bottom baseline -> the text extends one font size above y)
-        const y = Math.max(yAnchor, PetCharacter.nameFontSize);
-
-        //Draw text with an outline so it reads on any background
-        ctx.save();
-        ctx.font = `${PetCharacter.nameFontSize}px Stardew`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = '#2b1b10';
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeText(text, x, y);
-        ctx.fillText(text, x, y);
-        ctx.restore();
+        this.#nameplate.style.left = `${left}px`;
+        this.#nameplate.style.top = `${top}px`;
     }
 
     //Movement
