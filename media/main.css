@@ -109,6 +109,47 @@ body[cursor="none"] {
     transform-origin: 0% 0%;
 }
 
+/* Pet names */
+#nameplates {
+    /* Size */
+    width: 100%;
+    height: 100%;
+
+    /* Layout */
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+
+    /* Other */
+    pointer-events: none;
+}
+
+.petNameplate {
+    /* Size */
+    box-sizing: border-box;
+    max-width: min(160px, calc(100% - 8px));
+
+    /* Spacing */
+    padding: 2px 4px;
+
+    /* Layout */
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+
+    /* Visuals */
+    border-radius: 2px;
+    background: rgba(43, 27, 16, 0.9);
+
+    /* Text */
+    color: #fff3c4;
+    font: 600 14px/1.2 Stardew, sans-serif;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Hidden canvas */
 #canvasHidden {
     /* Layout */

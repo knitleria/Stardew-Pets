@@ -520,6 +520,8 @@ export class PetAI extends AI {
     #moodHideTimeout: Timeout = new Timeout(() => this.#moodShow = false);
     #moodHeartTimeout: Timeout = new Timeout(() => this.#setRandomMood());
 
+    get moodElevation(): number { return this.#moodElevation; }
+
 
     //State
     constructor(config: any) {
@@ -636,6 +638,10 @@ export class PetCharacter extends Character<PetAI> {
     get specie(): string { return this.#specie; }
     get color(): string { return this.#color; }
 
+    //Name plate
+    static nameGap: number = 2;
+    #nameplate: HTMLSpanElement = document.createElement('span');
+
 
     //Constructor
     constructor(name: string, specie: string, color: string, config: any = {}, config_ai: any = {}) {
@@ -650,6 +656,12 @@ export class PetCharacter extends Character<PetAI> {
         this.#specie = specie;
         this.#color = color;
 
+        //Create name plate outside the scaled game canvas
+        this.#nameplate.classList.add('petNameplate');
+        this.#nameplate.innerText = this.name;
+        this.#nameplate.setAttribute('aria-hidden', 'true');
+        Game.nameplates.append(this.#nameplate);
+
         //Move towards random point
         this.ai.moveTowardsRandom();
 
@@ -662,6 +674,9 @@ export class PetCharacter extends Character<PetAI> {
 
         //Remove from pets list
         Game.pets.removeItem(this);
+
+        //Remove name plate
+        this.#nameplate.remove();
     }
 
     //Clicks
@@ -674,12 +689,41 @@ export class PetCharacter extends Character<PetAI> {
     }
 
     //Rendering
-    draw(ctx: CanvasRenderingContext2D, options: any) {
+    draw(ctx: CanvasRenderingContext2D, options: any = {}) {
         //Draw character
         super.draw(ctx, options);
 
+        //Drawing into the alpha test canvas -> Nothing above the sprite counts as clickable
+        if (typeof options === 'object' && typeof options.pos === 'object') return;
+
         //Draw AI mood
         this.ai.drawMood(ctx);
+    }
+
+    updateNameplate(show: boolean) {
+        this.#nameplate.hidden = !show || !this.name;
+        if (this.#nameplate.hidden) return;
+
+        //Convert the pet's game coordinates into unscaled screen coordinates
+        const xAnchor = Math.round((this.pos.x + this.size.x / 2) * Game.scale);
+        const yAnchor = Math.round((this.pos.y + this.ai.moodElevation - PetCharacter.nameGap) * Game.scale);
+
+        //Keep the complete name plate on screen and on whole pixels
+        const width = this.#nameplate.offsetWidth;
+        const height = this.#nameplate.offsetHeight;
+        const left = Util.clamp(
+            Math.round(xAnchor - width / 2),
+            0,
+            Math.max(0, Game.windowSize.x - width)
+        );
+        const top = Util.clamp(
+            yAnchor - height,
+            0,
+            Math.max(0, Game.windowSize.y - height)
+        );
+
+        this.#nameplate.style.left = `${left}px`;
+        this.#nameplate.style.top = `${top}px`;
     }
 
     //Movement
