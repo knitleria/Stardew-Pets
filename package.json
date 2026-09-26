@@ -43,7 +43,9 @@
     "engines": {
         "vscode": "^1.92.0"
     },
-    "activationEvents": [],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
     "main": "./out/extension.js",
     "contributes": {
         "configuration": {
@@ -84,6 +86,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Shows each pet's name above it."
+                },
+                "stardew-pets.twitch.clientId": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Public Twitch application client ID. The extension uses it for device-code sign-in and does not store a client secret."
                 }
             }
         },
@@ -127,6 +134,14 @@
             {
                 "command": "stardew-pets.reloadSaveFile",
                 "title": "Stardew Pets: Reload save file"
+            },
+            {
+                "command": "stardew-pets.connectTwitch",
+                "title": "Stardew Pets: Connect Twitch"
+            },
+            {
+                "command": "stardew-pets.disconnectTwitch",
+                "title": "Stardew Pets: Disconnect Twitch"
             }
         ],
         "menus": {
@@ -168,7 +183,8 @@
     "scripts": {
         "vscode:prepublish": "npm run build-game && npm run compile",
         "watch": "tsc -watch -p ./",
-        "compile": "tsc -p ./ --noEmit",
+        "compile": "tsc -p ./ --noEmit && tsc -p tsconfig.test.json --noEmit",
+        "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/**/*.test.ts",
         "build-extension": "esbuild src/extension.ts --bundle --platform=node --outfile=out/extension.js --external:vscode",
         "build-game": "esbuild src/game/main.ts --bundle --outfile=media/main.js --minify",
         "build-all": "npm run build-extension && npm run build-game"

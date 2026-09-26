@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { startTwitch } from './twitch/start';
 
 
 
@@ -348,6 +349,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     //Load save file
     loadGame();
+    startTwitch(context, extensionStorageFolder);
 
 
 
