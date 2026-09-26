@@ -44,6 +44,14 @@ export function startTwitch(context: vscode.ExtensionContext, lockDir: string) {
         clock,
         twitch: createTwitchApi(),
         openSocket: openTwitchSocket,
+        rewardCosts: {
+            add() {
+                return vscode.workspace.getConfiguration('stardew-pets').get<number>('twitch.rewardCost') ?? 1000;
+            },
+            remove() {
+                return vscode.workspace.getConfiguration('stardew-pets').get<number>('twitch.removeRewardCost') ?? 100;
+            },
+        },
     });
 
     context.subscriptions.push(

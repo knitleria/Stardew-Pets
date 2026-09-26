@@ -91,6 +91,18 @@
                     "type": "string",
                     "default": "",
                     "description": "Public Twitch application client ID. The extension uses it for device-code sign-in and does not store a client secret."
+                },
+                "stardew-pets.twitch.rewardCost": {
+                    "type": "number",
+                    "default": 1000,
+                    "minimum": 1,
+                    "description": "Channel points cost of the Reward that adds a Pet."
+                },
+                "stardew-pets.twitch.removeRewardCost": {
+                    "type": "number",
+                    "default": 100,
+                    "minimum": 1,
+                    "description": "Channel points cost of the Reward that removes a Viewer's Pet."
                 }
             }
         },

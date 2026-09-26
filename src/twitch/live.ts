@@ -1,4 +1,4 @@
-import type { DevicePoll, TokenGrant, TwitchApi, TwitchSocket } from './connection';
+import type { DevicePoll, ManagedReward, TokenGrant, TwitchApi, TwitchSocket } from './connection';
 
 const deviceUrl = 'https://id.twitch.tv/oauth2/device';
 const tokenUrl = 'https://id.twitch.tv/oauth2/token';
@@ -70,6 +70,85 @@ export function createTwitchApi(): TwitchApi {
                 method: 'DELETE',
             });
         },
+        async listManagedRewards(input) {
+            const payload = await helixStatus(
+                input.clientId,
+                input.accessToken,
+                `/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(input.broadcasterUserId)}&only_manageable_rewards=true`,
+            );
+            if (payload.status === 403) {
+                return { forbidden: true as const };
+            }
+            if (!payload.ok) {
+                throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
+            }
+            return { rewards: managedRewards(payload.body) };
+        },
+        async createReward(input) {
+            const payload = await helixStatus(
+                input.clientId,
+                input.accessToken,
+                `/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(input.broadcasterUserId)}`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title: input.title,
+                        cost: input.cost,
+                        prompt: input.prompt,
+                        is_user_input_required: input.userInputRequired,
+                        is_enabled: input.isEnabled,
+                        should_redemptions_skip_request_queue: input.skipRequestQueue,
+                    }),
+                },
+            );
+            if (payload.status === 403) {
+                return { forbidden: true as const };
+            }
+            if (payload.status === 400 && isDuplicateReward(payload.body)) {
+                return { duplicateTitle: true as const };
+            }
+            if (!payload.ok) {
+                throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
+            }
+            return { id: firstDataId(payload.body) };
+        },
+        async updateReward(input) {
+            const body: Record<string, unknown> = {};
+            if (input.cost !== undefined) {
+                body.cost = input.cost;
+            }
+            if (input.prompt !== undefined) {
+                body.prompt = input.prompt;
+            }
+            if (input.userInputRequired !== undefined) {
+                body.is_user_input_required = input.userInputRequired;
+            }
+            if (input.isEnabled !== undefined) {
+                body.is_enabled = input.isEnabled;
+            }
+            if (input.isPaused !== undefined) {
+                body.is_paused = input.isPaused;
+            }
+            if (input.skipRequestQueue !== undefined) {
+                body.should_redemptions_skip_request_queue = input.skipRequestQueue;
+            }
+            const payload = await helixStatus(
+                input.clientId,
+                input.accessToken,
+                `/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(input.broadcasterUserId)}&id=${encodeURIComponent(input.id)}`,
+                {
+                    method: 'PATCH',
+                    body: JSON.stringify(body),
+                },
+            );
+            if (payload.status === 403) {
+                return { forbidden: true as const };
+            }
+            if (!payload.ok) {
+                throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
+            }
+            return { ok: true as const };
+        },
     };
 }
 
@@ -109,6 +188,14 @@ async function postForm(url: string, fields: Record<string, string>) {
 }
 
 async function helix(clientId: string, accessToken: string, path: string, init?: { method?: string; body?: string }) {
+    const payload = await helixStatus(clientId, accessToken, path, init);
+    if (!payload.ok) {
+        throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
+    }
+    return payload.body;
+}
+
+async function helixStatus(clientId: string, accessToken: string, path: string, init?: { method?: string; body?: string }) {
     const response = await fetch(`${helixUrl}${path}`, {
         method: init?.method ?? 'GET',
         headers: {
@@ -118,11 +205,7 @@ async function helix(clientId: string, accessToken: string, path: string, init?:
         },
         body: init?.body,
     });
-    const body = await readJson(response);
-    if (!response.ok) {
-        throw new Error(text(body) || `Twitch request failed (${response.status}).`);
-    }
-    return body;
+    return { ok: response.ok, status: response.status, body: await readJson(response) };
 }
 
 async function readJson(response: Response): Promise<Json> {
@@ -168,6 +251,20 @@ function dataArray(body: Json): Json[] {
         return [];
     }
     return body.data.filter((row): row is Json => typeof row === 'object' && row !== null);
+}
+
+function managedRewards(body: Json): ManagedReward[] {
+    return dataArray(body).flatMap(row => {
+        if (typeof row.id !== 'string' || typeof row.title !== 'string') {
+            return [];
+        }
+        return [{ id: row.id, title: row.title }];
+    });
+}
+
+function isDuplicateReward(body: Json): boolean {
+    const detail = `${stringOrEmpty(body.message)} ${stringOrEmpty(body.error)}`.toLowerCase();
+    return detail.includes('duplicate');
 }
 
 function stringField(body: Json, key: string): string {

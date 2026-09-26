@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createTwitchConnection, twitchTokenKey } from '../src/twitch/connection.ts';
+import { createTwitchConnection, twitchTokenKey, type RewardCreateInput, type RewardUpdateInput, type TwitchApi } from '../src/twitch/connection.ts';
 
 test('connect command without a saved token shows the device code and stores the granted tokens', async () => {
     const secrets = memorySecrets();
@@ -1466,6 +1466,500 @@ test('a socket error is shown once and the connection retries', async () => {
     assert.equal(sockets.length, 2);
 });
 
+test('connect creates both rewards disabled when the channel has none', async () => {
+    const secrets = memorySecrets();
+    await secrets.store(twitchTokenKey, JSON.stringify({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: 1_700_014_400_000,
+    }));
+    const created: RewardCreateInput[] = [];
+    const updated: RewardUpdateInput[] = [];
+    const connection = createTwitchConnection({
+        clientId: 'client-id',
+        lockDir: tempLockDir(),
+        secrets,
+        notify: {
+            showCode() {
+                throw new Error('unexpected code');
+            },
+            showError(message) {
+                throw new Error(`unexpected error: ${message}`);
+            },
+        },
+        clock: { now: () => 1_700_000_000_000, wait: () => new Promise<void>(() => undefined) },
+        twitch: {
+            ...quietSession(),
+            async listManagedRewards() {
+                return { rewards: [] };
+            },
+            async createReward(input) {
+                created.push(input);
+                return { id: `reward-${created.length}` };
+            },
+            async updateReward(input) {
+                updated.push(input);
+                return { ok: true as const };
+            },
+        },
+        openSocket(url) {
+            return new FakeSocket(url);
+        },
+    });
+
+    await connection.connect('startup');
+
+    assert.deepEqual(created, [
+        {
+            clientId: 'client-id',
+            accessToken: 'access-token',
+            broadcasterUserId: '42',
+            title: 'Добавить питомца в IDE',
+            cost: 1000,
+            prompt: 'введи тип животного и окрас в формате {Cat, Black}',
+            userInputRequired: true,
+            isEnabled: false,
+            skipRequestQueue: false,
+        },
+        {
+            clientId: 'client-id',
+            accessToken: 'access-token',
+            broadcasterUserId: '42',
+            title: 'Удалить питомца из IDE',
+            cost: 100,
+            prompt: '',
+            userInputRequired: false,
+            isEnabled: false,
+            skipRequestQueue: false,
+        },
+    ]);
+    assert.deepEqual(updated, [
+        {
+            clientId: 'client-id',
+            accessToken: 'access-token',
+            broadcasterUserId: '42',
+            id: 'reward-1',
+            isEnabled: true,
+            isPaused: true,
+            skipRequestQueue: false,
+        },
+        {
+            clientId: 'client-id',
+            accessToken: 'access-token',
+            broadcasterUserId: '42',
+            id: 'reward-2',
+            isEnabled: true,
+            isPaused: true,
+            skipRequestQueue: false,
+        },
+    ]);
+});
+
+test('a later connect finds the rewards it already owns instead of creating them again', async () => {
+    const created: string[] = [];
+    const updated: Array<{ id: string; cost?: number; prompt?: string; isPaused?: boolean }> = [];
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        twitch: {
+            async listManagedRewards() {
+                return {
+                    rewards: [
+                        { id: 'add-existing', title: 'Добавить питомца в IDE' },
+                        { id: 'remove-existing', title: 'Удалить питомца из IDE' },
+                    ],
+                };
+            },
+            async createReward(input) {
+                created.push(input.title);
+                return { id: 'new' };
+            },
+            async updateReward(input) {
+                updated.push({
+                    id: input.id,
+                    cost: input.cost,
+                    prompt: input.prompt,
+                    isPaused: input.isPaused,
+                });
+                return { ok: true as const };
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+
+    assert.deepEqual(created, []);
+    assert.deepEqual(updated, [
+        {
+            id: 'add-existing',
+            cost: 1000,
+            prompt: 'введи тип животного и окрас в формате {Cat, Black}',
+            isPaused: true,
+        },
+        {
+            id: 'remove-existing',
+            cost: 100,
+            prompt: '',
+            isPaused: true,
+        },
+    ]);
+});
+
+test('a live channel unpauses both rewards after the redemption subscription is in place', async () => {
+    const updated: Array<{ id: string; isPaused?: boolean }> = [];
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        live: true,
+        twitch: {
+            async listManagedRewards() {
+                return { rewards: [] };
+            },
+            async createReward() {
+                return { id: `reward-${updated.length + 1}` };
+            },
+            async updateReward(input) {
+                updated.push({ id: input.id, isPaused: input.isPaused });
+                return { ok: true as const };
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+    const pausedAtConnect = updated.filter(update => update.isPaused === true).length;
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+
+    assert.equal(pausedAtConnect, 2);
+    assert.deepEqual(updated.filter(update => update.isPaused === false).map(update => update.id), ['reward-1', 'reward-2']);
+});
+
+test('an offline channel leaves both rewards paused after EventSub welcomes', async () => {
+    const paused: boolean[] = [];
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        twitch: {
+            async updateReward(input) {
+                if (input.isPaused !== undefined) {
+                    paused.push(input.isPaused);
+                }
+                return { ok: true as const };
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+
+    assert.deepEqual(paused, [true, true]);
+});
+
+test('stream.offline pauses both rewards', async () => {
+    const paused: boolean[] = [];
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        live: true,
+        twitch: {
+            async listManagedRewards() {
+                return {
+                    rewards: [
+                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'remove-id', title: 'Удалить питомца из IDE' },
+                    ],
+                };
+            },
+            async updateReward(input) {
+                if (input.isPaused !== undefined) {
+                    paused.push(input.isPaused);
+                }
+                return { ok: true as const };
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+    sockets[0].receive(notification('msg-offline', 'stream.offline'));
+    await flush();
+
+    assert.deepEqual(paused, [true, true, false, false, true, true]);
+});
+
+test('stream.online unpauses both rewards after subscribing to redemptions', async () => {
+    const paused: boolean[] = [];
+    const types: string[] = [];
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        twitch: {
+            async listManagedRewards() {
+                return {
+                    rewards: [
+                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'remove-id', title: 'Удалить питомца из IDE' },
+                    ],
+                };
+            },
+            async subscribe(input) {
+                types.push(input.type);
+                return { id: `sub-${types.length}` };
+            },
+            async updateReward(input) {
+                if (input.isPaused !== undefined) {
+                    paused.push(input.isPaused);
+                }
+                return { ok: true as const };
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+    sockets[0].receive(notification('msg-online', 'stream.online'));
+    await flush();
+
+    assert.deepEqual(types, [
+        'stream.online',
+        'stream.offline',
+        'channel.channel_points_custom_reward_redemption.add',
+    ]);
+    assert.deepEqual(paused, [true, true, false, false]);
+});
+
+test('disconnect pauses both rewards and keeps the saved token', async () => {
+    const paused: boolean[] = [];
+    const { connection, secrets } = await savedTokenConnection({
+        live: true,
+        twitch: {
+            async listManagedRewards() {
+                return {
+                    rewards: [
+                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'remove-id', title: 'Удалить питомца из IDE' },
+                    ],
+                };
+            },
+            async updateReward(input) {
+                if (input.isPaused !== undefined) {
+                    paused.push(input.isPaused);
+                }
+                return { ok: true as const };
+            },
+        },
+    });
+
+    await connection.connect('startup');
+    await connection.disconnect();
+
+    assert.deepEqual(paused, [true, true, true, true]);
+    assert.equal(secrets.stored().length, 1);
+});
+
+test('closing the window pauses both rewards', async () => {
+    const paused: boolean[] = [];
+    const { connection } = await savedTokenConnection({
+        live: true,
+        twitch: {
+            async listManagedRewards() {
+                return {
+                    rewards: [
+                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'remove-id', title: 'Удалить питомца из IDE' },
+                    ],
+                };
+            },
+            async updateReward(input) {
+                if (input.isPaused !== undefined) {
+                    paused.push(input.isPaused);
+                }
+                return { ok: true as const };
+            },
+        },
+    });
+
+    await connection.connect('startup');
+    connection.dispose();
+    await flush();
+
+    assert.deepEqual(paused, [true, true, true, true]);
+});
+
+test('a leftover reward with the same title asks the farmer to rename or delete it', async () => {
+    const errors: string[] = [];
+    const created: string[] = [];
+    const { connection } = await savedTokenConnection({
+        notify: {
+            showCode() {
+                throw new Error('unexpected code');
+            },
+            showError(message) {
+                errors.push(message);
+            },
+        },
+        twitch: {
+            async createReward(input) {
+                created.push(input.title);
+                if (input.title === 'Добавить питомца в IDE') {
+                    return { duplicateTitle: true as const };
+                }
+                return { id: 'remove-id' };
+            },
+        },
+    });
+
+    await connection.connect('startup');
+
+    assert.deepEqual(created, ['Добавить питомца в IDE', 'Удалить питомца из IDE']);
+    assert.deepEqual(errors, ['A Twitch reward named "Добавить питомца в IDE" already exists. Rename or delete it, then Connect again.']);
+});
+
+test('a channel without channel points is told that Twitch features are unavailable', async () => {
+    const errors: string[] = [];
+    let created = 0;
+    const { connection } = await savedTokenConnection({
+        notify: {
+            showCode() {
+                throw new Error('unexpected code');
+            },
+            showError(message) {
+                errors.push(message);
+            },
+        },
+        twitch: {
+            async listManagedRewards() {
+                return { forbidden: true as const };
+            },
+            async createReward() {
+                created += 1;
+                return { id: 'reward' };
+            },
+        },
+    });
+
+    await connection.connect('startup');
+
+    assert.equal(created, 0);
+    assert.deepEqual(errors, ['Twitch channel points are only available for Affiliate and Partner channels.']);
+});
+
+test('a channel without channel points does not open EventSub', async () => {
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        notify: {
+            showCode() {
+                throw new Error('unexpected code');
+            },
+            showError() {
+                return undefined;
+            },
+        },
+        twitch: {
+            async listManagedRewards() {
+                return { forbidden: true as const };
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+
+    assert.deepEqual(sockets, []);
+});
+
+test('a dropped socket pauses both rewards before it waits to reconnect', async () => {
+    const paused: boolean[] = [];
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        live: true,
+        notify: {
+            showCode() {
+                throw new Error('unexpected code');
+            },
+            showError() {
+                return undefined;
+            },
+        },
+        twitch: {
+            async listManagedRewards() {
+                return {
+                    rewards: [
+                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'remove-id', title: 'Удалить питомца из IDE' },
+                    ],
+                };
+            },
+            async updateReward(input) {
+                if (input.isPaused !== undefined) {
+                    paused.push(input.isPaused);
+                }
+                return { ok: true as const };
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+    sockets[0].drop();
+    await flush();
+
+    assert.deepEqual(paused.slice(-2), [true, true]);
+});
+
+test('reward costs come from the farmer settings', async () => {
+    const created: number[] = [];
+    const { connection } = await savedTokenConnection({
+        rewardCosts: {
+            add: () => 2500,
+            remove: () => 50,
+        },
+        twitch: {
+            async createReward(input) {
+                created.push(input.cost);
+                return { id: `reward-${created.length}` };
+            },
+        },
+    });
+
+    await connection.connect('startup');
+
+    assert.deepEqual(created, [2500, 50]);
+});
+
 test('a failed startup retries on the reconnect schedule', async () => {
     const secrets = memorySecrets();
     await secrets.store(twitchTokenKey, JSON.stringify({
@@ -1567,6 +2061,46 @@ function signInDependencies(lockDir: string, onDeviceCode: () => void) {
     };
 }
 
+function savedTokenConnection(options: {
+    live?: boolean;
+    twitch?: Partial<TwitchApi>;
+    openSocket?: (url: string) => FakeSocket;
+    notify?: { showCode(code: string, uri: string): void; showError(message: string): void };
+    rewardCosts?: { add(): number; remove(): number };
+} = {}) {
+    const secrets = memorySecrets();
+    return secrets.store(twitchTokenKey, JSON.stringify({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: 1_700_014_400_000,
+    })).then(() => ({
+        secrets,
+        connection: createTwitchConnection({
+            clientId: 'client-id',
+            lockDir: tempLockDir(),
+            secrets,
+            notify: options.notify ?? {
+                showCode() {
+                    throw new Error('unexpected code');
+                },
+                showError(message) {
+                    throw new Error(`unexpected error: ${message}`);
+                },
+            },
+            clock: { now: () => 1_700_000_000_000, wait: () => new Promise<void>(() => undefined) },
+            twitch: {
+                ...quietSession(),
+                async isStreamLive() {
+                    return options.live === true;
+                },
+                ...options.twitch,
+            },
+            openSocket: options.openSocket ?? ((url: string) => new FakeSocket(url)),
+            rewardCosts: options.rewardCosts,
+        }),
+    }));
+}
+
 function quietSession() {
     return {
         async requestDeviceCode(): Promise<never> {
@@ -1589,6 +2123,15 @@ function quietSession() {
         },
         async unsubscribe() {
             return undefined;
+        },
+        async listManagedRewards() {
+            return { rewards: [] };
+        },
+        async createReward() {
+            return { id: 'reward-id' };
+        },
+        async updateReward() {
+            return { ok: true as const };
         },
     };
 }
