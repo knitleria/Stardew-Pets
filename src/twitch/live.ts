@@ -70,11 +70,11 @@ export function createTwitchApi(): TwitchApi {
                 method: 'DELETE',
             });
         },
-        async listManagedRewards(input) {
+        async listRewards(input) {
             const payload = await helixStatus(
                 input.clientId,
                 input.accessToken,
-                `/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(input.broadcasterUserId)}&only_manageable_rewards=true`,
+                `/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(input.broadcasterUserId)}`,
             );
             if (payload.status === 403) {
                 return { forbidden: true as const };
@@ -83,34 +83,6 @@ export function createTwitchApi(): TwitchApi {
                 throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
             }
             return { rewards: managedRewards(payload.body) };
-        },
-        async createReward(input) {
-            const payload = await helixStatus(
-                input.clientId,
-                input.accessToken,
-                `/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(input.broadcasterUserId)}`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        title: input.title,
-                        cost: input.cost,
-                        prompt: input.prompt,
-                        is_user_input_required: input.userInputRequired,
-                        is_enabled: input.isEnabled,
-                        should_redemptions_skip_request_queue: input.skipRequestQueue,
-                    }),
-                },
-            );
-            if (payload.status === 403) {
-                return { forbidden: true as const };
-            }
-            if (payload.status === 400 && isDuplicateReward(payload.body)) {
-                return { duplicateTitle: true as const };
-            }
-            if (!payload.ok) {
-                throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
-            }
-            return { id: firstDataId(payload.body) };
         },
         async updateReward(input) {
             const body: Record<string, unknown> = {};
@@ -260,11 +232,6 @@ function managedRewards(body: Json): ManagedReward[] {
         }
         return [{ id: row.id, title: row.title }];
     });
-}
-
-function isDuplicateReward(body: Json): boolean {
-    const detail = `${stringOrEmpty(body.message)} ${stringOrEmpty(body.error)}`.toLowerCase();
-    return detail.includes('duplicate');
 }
 
 function stringField(body: Json, key: string): string {

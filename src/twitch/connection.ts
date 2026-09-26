@@ -56,18 +56,6 @@ export type ManagedReward = {
     title: string;
 };
 
-export type RewardCreateInput = {
-    clientId: string;
-    accessToken: string;
-    broadcasterUserId: string;
-    title: string;
-    cost: number;
-    prompt: string;
-    userInputRequired: boolean;
-    isEnabled: boolean;
-    skipRequestQueue: boolean;
-};
-
 export type RewardUpdateInput = {
     clientId: string;
     accessToken: string;
@@ -95,12 +83,11 @@ export type TwitchApi = {
         broadcasterUserId: string;
     }): Promise<{ id: string }>;
     unsubscribe(input: { clientId: string; accessToken: string; id: string }): Promise<void>;
-    listManagedRewards(input: {
+    listRewards(input: {
         clientId: string;
         accessToken: string;
         broadcasterUserId: string;
     }): Promise<{ rewards: ManagedReward[] } | { forbidden: true }>;
-    createReward(input: RewardCreateInput): Promise<{ id: string } | { duplicateTitle: true } | { forbidden: true }>;
     updateReward(input: RewardUpdateInput): Promise<{ ok: true } | { forbidden: true }>;
 };
 
@@ -322,7 +309,7 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         try {
             const user = await dependencies.twitch.currentUser(dependencies.clientId, tokens.accessToken);
             broadcasterUserId = user.id;
-            if (!await ensureRewards()) {
+            if (!await bindRewards()) {
                 return;
             }
             activeSocket = dependencies.openSocket(EVENTSUB_URL);
@@ -489,8 +476,8 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         });
     }
 
-    async function ensureRewards(): Promise<boolean> {
-        const listed = await dependencies.twitch.listManagedRewards({
+    async function bindRewards(): Promise<boolean> {
+        const listed = await dependencies.twitch.listRewards({
             clientId: dependencies.clientId,
             accessToken: socketAccessToken,
             broadcasterUserId,
@@ -499,14 +486,14 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             denyChannelPoints();
             return false;
         }
-        addRewardId = await ensureReward({
+        addRewardId = await bindReward({
             title: ADD_REWARD_TITLE,
             cost: rewardCosts.add(),
             prompt: ADD_REWARD_PROMPT,
             userInputRequired: true,
             existing: listed.rewards,
         });
-        removeRewardId = await ensureReward({
+        removeRewardId = await bindReward({
             title: REMOVE_REWARD_TITLE,
             cost: rewardCosts.remove(),
             prompt: '',
@@ -516,7 +503,7 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         return true;
     }
 
-    async function ensureReward(spec: {
+    async function bindReward(spec: {
         title: string;
         cost: number;
         prompt: string;
@@ -524,58 +511,27 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         existing: ManagedReward[];
     }): Promise<string | undefined> {
         const found = spec.existing.find(reward => reward.title === spec.title);
-        if (found !== undefined) {
-            const updated = await dependencies.twitch.updateReward({
-                clientId: dependencies.clientId,
-                accessToken: socketAccessToken,
-                broadcasterUserId,
-                id: found.id,
-                cost: spec.cost,
-                prompt: spec.prompt,
-                userInputRequired: spec.userInputRequired,
-                isEnabled: true,
-                isPaused: true,
-                skipRequestQueue: false,
-            });
-            if ('forbidden' in updated) {
-                denyChannelPoints();
-                return undefined;
-            }
-            return found.id;
-        }
-        const created = await dependencies.twitch.createReward({
-            clientId: dependencies.clientId,
-            accessToken: socketAccessToken,
-            broadcasterUserId,
-            title: spec.title,
-            cost: spec.cost,
-            prompt: spec.prompt,
-            userInputRequired: spec.userInputRequired,
-            isEnabled: false,
-            skipRequestQueue: false,
-        });
-        if ('forbidden' in created) {
-            denyChannelPoints();
-            return undefined;
-        }
-        if ('duplicateTitle' in created) {
-            dependencies.notify.showError(`A Twitch reward named "${spec.title}" already exists. Rename or delete it, then Connect again.`);
+        if (found === undefined) {
+            dependencies.notify.showError(`A Twitch reward named "${spec.title}" was not found. Create it on the channel, then Connect again.`);
             return undefined;
         }
         const updated = await dependencies.twitch.updateReward({
             clientId: dependencies.clientId,
             accessToken: socketAccessToken,
             broadcasterUserId,
-            id: created.id,
+            id: found.id,
+            cost: spec.cost,
+            prompt: spec.prompt,
+            userInputRequired: spec.userInputRequired,
             isEnabled: true,
             isPaused: true,
             skipRequestQueue: false,
         });
         if ('forbidden' in updated) {
-            denyChannelPoints();
+            dependencies.notify.showError(`A Twitch reward named "${spec.title}" already exists. Rename or delete it, then Connect again.`);
             return undefined;
         }
-        return created.id;
+        return found.id;
     }
 
     async function setRewardsPaused(paused: boolean) {
