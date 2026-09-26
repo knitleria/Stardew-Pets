@@ -121,6 +121,20 @@ export function createTwitchApi(): TwitchApi {
             }
             return { ok: true as const };
         },
+        async updateRedemption(input) {
+            const payload = await helixStatus(
+                input.clientId,
+                input.accessToken,
+                `/channel_points/custom_rewards/redemptions?broadcaster_id=${encodeURIComponent(input.broadcasterUserId)}&reward_id=${encodeURIComponent(input.rewardId)}&id=${encodeURIComponent(input.redemptionId)}`,
+                {
+                    method: 'PATCH',
+                    body: JSON.stringify({ status: input.status }),
+                },
+            );
+            if (!payload.ok) {
+                throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
+            }
+        },
     };
 }
 

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { petSpecies as PetSpecies } from './pets/catalog';
 import { startTwitch } from './twitch/start';
 
 
@@ -20,25 +21,6 @@ const MonsterSpecies: { [key: string]: string[] } = {
     Crab:       ['Rock', 'Rock Dangerous', 'Lava', 'Lava Dangerous', 'Iridium', 'Truffle', 'Stickbug', 'Magma Cap'],
 }
 
-const PetSpecies: { [key: string]: string[] } = {
-    Cat:        ['Black', 'Gray', 'Orange', 'White', 'Yellow', 'Purple'],
-    Dog:        ['Blonde', 'Gray', 'Brown', 'Dark Brown', 'Light Brown', 'Purple'],
-    Turtle:     ['Green', 'Purple'],
-    Dino:       [],
-    Duck:       [],
-    Raccoon:    [],
-    Goat:       ['Adult', 'Baby'],
-    Sheep:      ['Adult', 'Baby'],
-    Ostrich:    ['Adult', 'Baby'],
-    Pig:        ['Adult', 'Baby'],
-    Rabbit:     ['Adult', 'Baby'],
-    Chicken:    ['White Adult', 'White Baby', 'Blue Adult', 'Blue Baby', 'Brown Adult', 'Brown Baby', 'Black Adult', 'Black Baby'],
-    Cow:        ['White Adult', 'White Baby', 'Brown Adult', 'Brown Baby'],
-    Parrot:     ['Green Adult', 'Green Baby', 'Blue Adult', 'Blue Baby', 'Golden Joja'],
-    Horse:      [],
-    Junimo:     ['White', 'Black', 'Gray', 'Pink', 'Red', 'Orange', 'Yellow', 'Green', 'Cyan', 'Purple', 'Brown'],
-}
-
 const Names: string[] = [
     'Alex',     'Raúl',     'Aitor',    'Chao',
     'Mar',      'Sara',     'Pablo',    'Laura',
@@ -55,6 +37,7 @@ type Pet = {
     name: string;
     specie: string;
     color: string;
+    twitchUserId?: string;
 }
 
 type Decoration = {
@@ -349,7 +332,6 @@ export function activate(context: vscode.ExtensionContext) {
 
     //Load save file
     loadGame();
-    startTwitch(context, extensionStorageFolder);
 
 
 
@@ -364,6 +346,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     webview = new WebViewProvider(context);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(WebViewProvider.viewType, webview));
+    startTwitch(context, extensionStorageFolder, {
+        pets() {
+            return save.pets;
+        },
+        add(pet) {
+            addPet(pet);
+        },
+        greet(text) {
+            webview.greet(text);
+        },
+    });
 
     vscode.workspace.onDidChangeConfiguration(event => {
         //Update config
@@ -534,6 +527,8 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'stardew-pets';
 
     private view?: vscode.WebviewView;
+    private listening = false;
+    private greetings: string[] = [];
 
     constructor(private readonly context: vscode.ExtensionContext) { }
 
@@ -541,9 +536,26 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage(message);
     }
 
+    public greet(text: string) {
+        if (this.view === undefined || !this.listening) {
+            this.greetings.push(text);
+            return;
+        }
+        void this.view.webview.postMessage({ type: 'message', value: text });
+    }
+
+    public showHeldGreetings() {
+        const texts = this.greetings;
+        this.greetings = [];
+        for (const text of texts) {
+            void this.view?.webview.postMessage({ type: 'message', value: text });
+        }
+    }
+
     public async resolveWebviewView(webviewView: vscode.WebviewView, context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken) {
         //Needed so we can use it in postMessageToWebview
         this.view = webviewView;
+        this.listening = false;
 
         //Get webview
         const webview = webviewView.webview;
@@ -571,7 +583,9 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
 
                 //Init pets
                 case 'init':
+                    this.listening = true;
                     initGame();
+                    this.showHeldGreetings();
                     break;
 
                 //Update money

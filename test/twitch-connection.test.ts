@@ -1921,6 +1921,44 @@ test('reward costs come from the farmer settings', async () => {
     assert.deepEqual(costs, [2500, 50]);
 });
 
+test('settling a redemption tells Twitch whether it was fulfilled or refunded', async () => {
+    const updates: Array<{ redemptionId: string; rewardId: string; status: string; broadcasterUserId: string; accessToken: string }> = [];
+    const { connection } = await savedTokenConnection({
+        twitch: {
+            async updateRedemption(input) {
+                updates.push({
+                    redemptionId: input.redemptionId,
+                    rewardId: input.rewardId,
+                    status: input.status,
+                    broadcasterUserId: input.broadcasterUserId,
+                    accessToken: input.accessToken,
+                });
+            },
+        },
+    });
+
+    await connection.connect('startup');
+    await connection.settleRedemption('redemption-1', 'add-id', 'CANCELED');
+    await connection.settleRedemption('redemption-2', 'add-id', 'FULFILLED');
+
+    assert.deepEqual(updates, [
+        {
+            redemptionId: 'redemption-1',
+            rewardId: 'add-id',
+            status: 'CANCELED',
+            broadcasterUserId: '42',
+            accessToken: 'access-token',
+        },
+        {
+            redemptionId: 'redemption-2',
+            rewardId: 'add-id',
+            status: 'FULFILLED',
+            broadcasterUserId: '42',
+            accessToken: 'access-token',
+        },
+    ]);
+});
+
 test('a failed startup retries on the reconnect schedule', async () => {
     const secrets = memorySecrets();
     await secrets.store(twitchTokenKey, JSON.stringify({
@@ -2095,6 +2133,9 @@ function quietSession() {
         },
         async updateReward() {
             return { ok: true as const };
+        },
+        async updateRedemption() {
+            throw new Error('unexpected redemption update');
         },
     };
 }

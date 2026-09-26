@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { petSpecies } from '../pets/catalog';
+import { honourAddPet, type Farm } from './add-pet';
 import { Clock, createTwitchConnection } from './connection';
 import { createTwitchApi, openTwitchSocket } from './live';
 
@@ -13,7 +15,7 @@ const clock: Clock = {
     },
 };
 
-export function startTwitch(context: vscode.ExtensionContext, lockDir: string) {
+export function startTwitch(context: vscode.ExtensionContext, lockDir: string, farm: Farm) {
     const clientId = vscode.workspace.getConfiguration('stardew-pets').get<string>('twitch.clientId') ?? '';
     const connection = createTwitchConnection({
         clientId,
@@ -59,6 +61,21 @@ export function startTwitch(context: vscode.ExtensionContext, lockDir: string) {
         vscode.commands.registerCommand('stardew-pets.disconnectTwitch', () => connection.disconnect()),
         { dispose: () => { connection.dispose(); } },
     );
+
+    connection.onEvent(event => {
+        if (event.type !== 'redemption') {
+            return;
+        }
+        const redemption = event.redemption;
+        void honourAddPet(redemption, farm, {
+            settle(status) {
+                return connection.settleRedemption(redemption.id, redemption.rewardId, status);
+            },
+        }, petSpecies).catch(error => {
+            const message = error instanceof Error ? error.message : 'Twitch redemption failed.';
+            void vscode.window.showErrorMessage(message);
+        });
+    });
 
     void connection.connect('startup').catch(error => {
         const message = error instanceof Error ? error.message : 'Twitch connection failed.';

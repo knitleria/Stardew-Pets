@@ -89,6 +89,14 @@ export type TwitchApi = {
         broadcasterUserId: string;
     }): Promise<{ rewards: ManagedReward[] } | { forbidden: true }>;
     updateReward(input: RewardUpdateInput): Promise<{ ok: true } | { forbidden: true }>;
+    updateRedemption(input: {
+        clientId: string;
+        accessToken: string;
+        broadcasterUserId: string;
+        rewardId: string;
+        redemptionId: string;
+        status: 'FULFILLED' | 'CANCELED';
+    }): Promise<void>;
 };
 
 export type TwitchSocket = {
@@ -118,6 +126,7 @@ export type TwitchConnection = {
     connect(reason: ConnectReason): Promise<void>;
     disconnect(): Promise<void>;
     onEvent(listener: (event: TwitchEvent) => void): () => void;
+    settleRedemption(redemptionId: string, rewardId: string, status: 'FULFILLED' | 'CANCELED'): Promise<void>;
     dispose(): void;
 };
 
@@ -142,7 +151,7 @@ const TOKEN_KEY = twitchTokenKey;
 const SCOPE = 'channel:manage:redemptions';
 const EVENTSUB_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const REFRESH_LEEWAY_MS = 60_000;
-const ADD_REWARD_TITLE = 'Добавить питомца в IDE';
+export const addPetRewardTitle = 'Добавить питомца в IDE';
 const REMOVE_REWARD_TITLE = 'Удалить питомца из IDE';
 const ADD_REWARD_PROMPT = 'введи тип животного и окрас в формате {Cat, Black}';
 const DEFAULT_ADD_COST = 1000;
@@ -215,6 +224,16 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             return () => {
                 listeners.delete(listener);
             };
+        },
+        settleRedemption(redemptionId, rewardId, status) {
+            return dependencies.twitch.updateRedemption({
+                clientId: dependencies.clientId,
+                accessToken: socketAccessToken,
+                broadcasterUserId,
+                rewardId,
+                redemptionId,
+                status,
+            });
         },
         dispose() {
             stopped = true;
@@ -487,7 +506,7 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             return false;
         }
         addRewardId = await bindReward({
-            title: ADD_REWARD_TITLE,
+            title: addPetRewardTitle,
             cost: rewardCosts.add(),
             prompt: ADD_REWARD_PROMPT,
             userInputRequired: true,
