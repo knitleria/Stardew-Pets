@@ -353,6 +353,14 @@ export function activate(context: vscode.ExtensionContext) {
         add(pet) {
             addPet(pet);
         },
+        remove(pet) {
+            const index = save.pets.indexOf(pet);
+            if (index < 0) {
+                return false;
+            }
+            removePet(index, true);
+            return true;
+        },
         greet(text) {
             webview.greet(text);
         },

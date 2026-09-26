@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { petSpecies } from '../pets/catalog';
 import { honourAddPet, type Farm } from './add-pet';
+import { honourRemovePet } from './remove-pet';
 import { Clock, createTwitchConnection } from './connection';
 import { createTwitchApi, openTwitchSocket } from './live';
 
@@ -67,15 +68,19 @@ export function startTwitch(context: vscode.ExtensionContext, lockDir: string, f
             return;
         }
         const redemption = event.redemption;
-        void honourAddPet(redemption, farm, {
-            settle(status) {
+        const desk = {
+            settle(status: 'FULFILLED' | 'CANCELED') {
                 return connection.settleRedemption(redemption.id, redemption.rewardId, status);
             },
-        }, petSpecies).catch(error => {
-            const message = error instanceof Error ? error.message : 'Twitch redemption failed.';
-            void vscode.window.showErrorMessage(message);
-        });
+        };
+        void honourAddPet(redemption, farm, desk, petSpecies).catch(reportRedemption);
+        void honourRemovePet(redemption, farm, desk).catch(reportRedemption);
     });
+
+    function reportRedemption(error: unknown) {
+        const message = error instanceof Error ? error.message : 'Twitch redemption failed.';
+        void vscode.window.showErrorMessage(message);
+    }
 
     void connection.connect('startup').catch(error => {
         const message = error instanceof Error ? error.message : 'Twitch connection failed.';

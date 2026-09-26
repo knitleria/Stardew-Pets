@@ -12,6 +12,7 @@ export type SpeciesCatalog = Readonly<Record<string, readonly string[]>>;
 export type Farm = {
     pets(): readonly SavedPet[];
     add(pet: SavedPet): void;
+    remove(pet: SavedPet): boolean;
     greet(text: string): void;
 };
 

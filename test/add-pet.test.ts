@@ -255,6 +255,14 @@ function farmWith(pets: SavedPet[] = []) {
             add(pet: SavedPet) {
                 pets.push(pet);
             },
+            remove(pet: SavedPet) {
+                const index = pets.indexOf(pet);
+                if (index < 0) {
+                    return false;
+                }
+                pets.splice(index, 1);
+                return true;
+            },
             greet(text: string) {
                 greetings.push(text);
             },

@@ -152,7 +152,7 @@ const SCOPE = 'channel:manage:redemptions';
 const EVENTSUB_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const REFRESH_LEEWAY_MS = 60_000;
 export const addPetRewardTitle = 'Добавить питомца в IDE';
-const REMOVE_REWARD_TITLE = 'Удалить питомца из IDE';
+export const removePetRewardTitle = 'Удалить питомца из IDE';
 const ADD_REWARD_PROMPT = 'введи тип животного и окрас в формате {Cat, Black}';
 const DEFAULT_ADD_COST = 1000;
 const DEFAULT_REMOVE_COST = 100;
@@ -513,7 +513,7 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             existing: listed.rewards,
         });
         removeRewardId = await bindReward({
-            title: REMOVE_REWARD_TITLE,
+            title: removePetRewardTitle,
             cost: rewardCosts.remove(),
             prompt: '',
             userInputRequired: false,
