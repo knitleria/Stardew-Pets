@@ -17,6 +17,9 @@ const clock: Clock = {
 };
 
 export function startTwitch(context: vscode.ExtensionContext, lockDir: string, farm: Farm) {
+    const output = vscode.window.createOutputChannel('Stardew Pets');
+    context.subscriptions.push(output);
+    output.show(true);
     const clientId = vscode.workspace.getConfiguration('stardew-pets').get<string>('twitch.clientId') ?? '';
     const connection = createTwitchConnection({
         clientId,
@@ -47,6 +50,10 @@ export function startTwitch(context: vscode.ExtensionContext, lockDir: string, f
         clock,
         twitch: createTwitchApi(),
         openSocket: openTwitchSocket,
+        log(message) {
+            output.appendLine(message);
+            console.log(message);
+        },
         rewardCosts: {
             add() {
                 return vscode.workspace.getConfiguration('stardew-pets').get<number>('twitch.rewardCost') ?? 1000;

@@ -54,7 +54,7 @@ export function createTwitchApi(): TwitchApi {
             return dataArray(payload).length > 0;
         },
         async subscribe(input) {
-            const payload = await helix(input.clientId, input.accessToken, '/eventsub/subscriptions', {
+            const payload = await helixStatus(input.clientId, input.accessToken, '/eventsub/subscriptions', {
                 method: 'POST',
                 body: JSON.stringify({
                     type: input.type,
@@ -63,7 +63,17 @@ export function createTwitchApi(): TwitchApi {
                     transport: { method: 'websocket', session_id: input.sessionId },
                 }),
             });
-            return { id: firstDataId(payload) };
+            if (payload.status === 409) {
+                const id = existingSubscriptionId(text(payload.body));
+                if (id === undefined) {
+                    throw new Error(text(payload.body) || 'Twitch subscription already exists.');
+                }
+                return { alreadyExists: id };
+            }
+            if (!payload.ok) {
+                throw new Error(text(payload.body) || `Twitch request failed (${payload.status}).`);
+            }
+            return { id: firstDataId(payload.body) };
         },
         async unsubscribe(input) {
             await helix(input.clientId, input.accessToken, `/eventsub/subscriptions?id=${encodeURIComponent(input.id)}`, {
@@ -266,6 +276,11 @@ function numberField(body: Json, key: string): number {
 
 function stringOrEmpty(value: unknown): string {
     return typeof value === 'string' ? value : '';
+}
+
+export function existingSubscriptionId(message: string): string | undefined {
+    const match = message.match(/id=(\S+)/);
+    return match?.[1];
 }
 
 function text(body: Json): string {

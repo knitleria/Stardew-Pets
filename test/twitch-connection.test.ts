@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createTwitchConnection, twitchTokenKey, type RewardUpdateInput, type TwitchApi } from '../src/twitch/connection.ts';
+import { existingSubscriptionId } from '../src/twitch/live.ts';
 
 test('connect command without a saved token shows the device code and stores the granted tokens', async () => {
     const secrets = memorySecrets();
@@ -428,6 +429,75 @@ test('a saved token opens one EventSub socket and subscribes to stream online an
     assert.deepEqual(subscriptions, [
         { type: 'stream.online', sessionId: 'session-1', broadcasterUserId: '42', accessToken: 'access-token' },
         { type: 'stream.offline', sessionId: 'session-1', broadcasterUserId: '42', accessToken: 'access-token' },
+    ]);
+});
+
+test('a subscription Twitch already has is removed and created for this socket', async () => {
+    const removed: string[] = [];
+    const created: string[] = [];
+    let calls = 0;
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        twitch: {
+            async subscribe(input) {
+                calls += 1;
+                if (calls === 1) {
+                    return { alreadyExists: '95211013-927c-4437-b0fe-4d6c4874da13' };
+                }
+                created.push(input.type);
+                return { id: `sub-${calls}` };
+            },
+            async unsubscribe(input) {
+                removed.push(input.id);
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+
+    assert.deepEqual(removed, ['95211013-927c-4437-b0fe-4d6c4874da13']);
+    assert.deepEqual(created, ['stream.online', 'stream.offline']);
+});
+
+test('Twitch names the subscription that already exists', () => {
+    assert.equal(
+        existingSubscriptionId('subscription already exists; id=95211013-927c-4437-b0fe-4d6c4874da13'),
+        '95211013-927c-4437-b0fe-4d6c4874da13',
+    );
+});
+
+test('connect and disconnect are written to the log', async () => {
+    const lines: string[] = [];
+    const sockets: FakeSocket[] = [];
+    const { connection } = await savedTokenConnection({
+        log(message) {
+            lines.push(message);
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+        },
+    });
+
+    await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+    await connection.disconnect();
+
+    assert.deepEqual(lines, [
+        'Twitch: connecting (startup)',
+        'Twitch: reward found: Добавить питомца в IDE',
+        'Twitch: reward found: Удалить питомца из IDE',
+        'Twitch: connected, channel offline',
+        'Twitch: disconnected',
     ]);
 });
 
@@ -1762,9 +1832,13 @@ test('closing the window pauses both rewards', async () => {
     assert.deepEqual(paused, [true, true, true, true]);
 });
 
-test('a leftover reward with the same title asks the farmer to rename or delete it', async () => {
+test('a reward Twitch will not let the app change is kept and not settled through the API', async () => {
     const errors: string[] = [];
+    const rewardUpdates: string[] = [];
+    const redemptions: string[] = [];
+    const sockets: FakeSocket[] = [];
     const { connection } = await savedTokenConnection({
+        live: true,
         notify: {
             showCode() {
                 throw new Error('unexpected code');
@@ -1783,17 +1857,32 @@ test('a leftover reward with the same title asks the farmer to rename or delete 
                 };
             },
             async updateReward(input) {
+                rewardUpdates.push(input.id);
                 if (input.id === 'foreign-add') {
                     return { forbidden: true as const };
                 }
                 return { ok: true as const };
             },
+            async updateRedemption(input) {
+                redemptions.push(input.rewardId);
+            },
+        },
+        openSocket(url) {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
         },
     });
 
     await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+    await connection.settleRedemption('redemption-1', 'foreign-add', 'FULFILLED');
+    await connection.settleRedemption('redemption-2', 'remove-id', 'CANCELED');
 
-    assert.deepEqual(errors, ['A Twitch reward named "Добавить питомца в IDE" already exists. Rename or delete it, then Connect again.']);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(rewardUpdates, ['foreign-add', 'remove-id', 'remove-id']);
+    assert.deepEqual(redemptions, ['remove-id']);
 });
 
 test('a channel without channel points is told that Twitch features are unavailable', async () => {
@@ -2066,6 +2155,7 @@ function savedTokenConnection(options: {
     openSocket?: (url: string) => FakeSocket;
     notify?: { showCode(code: string, uri: string): void; showError(message: string): void };
     rewardCosts?: { add(): number; remove(): number };
+    log?: (message: string) => void;
 } = {}) {
     const secrets = memorySecrets();
     return secrets.store(twitchTokenKey, JSON.stringify({
@@ -2096,6 +2186,7 @@ function savedTokenConnection(options: {
             },
             openSocket: options.openSocket ?? ((url: string) => new FakeSocket(url)),
             rewardCosts: options.rewardCosts,
+            log: options.log,
         }),
     }));
 }
