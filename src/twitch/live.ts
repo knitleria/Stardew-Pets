@@ -49,10 +49,6 @@ export function createTwitchApi(): TwitchApi {
             const id = firstDataId(payload);
             return { id };
         },
-        async isStreamLive(clientId, accessToken, userId) {
-            const payload = await helix(clientId, accessToken, `/streams?user_id=${encodeURIComponent(userId)}`);
-            return dataArray(payload).length > 0;
-        },
         async subscribe(input) {
             const payload = await helixStatus(input.clientId, input.accessToken, '/eventsub/subscriptions', {
                 method: 'POST',
