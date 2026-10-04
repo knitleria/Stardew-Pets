@@ -268,6 +268,10 @@ window.addEventListener('message', (event) => {
             Game.setShowNames(message.value !== false);
             break;
 
+        case 'message':
+            Game.showMessage(message.value);
+            break;
+
         //
         // Game objects
         //

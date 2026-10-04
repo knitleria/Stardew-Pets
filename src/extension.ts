@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { petSpecies as PetSpecies } from './pets/catalog';
+import { SharedJsonFile } from './shared-json-file';
+import { startTwitch } from './twitch/start';
 
 
 
@@ -19,25 +22,6 @@ const MonsterSpecies: { [key: string]: string[] } = {
     Crab:       ['Rock', 'Rock Dangerous', 'Lava', 'Lava Dangerous', 'Iridium', 'Truffle', 'Stickbug', 'Magma Cap'],
 }
 
-const PetSpecies: { [key: string]: string[] } = {
-    Cat:        ['Black', 'Gray', 'Orange', 'White', 'Yellow', 'Purple'],
-    Dog:        ['Blonde', 'Gray', 'Brown', 'Dark Brown', 'Light Brown', 'Purple'],
-    Turtle:     ['Green', 'Purple'],
-    Dino:       [],
-    Duck:       [],
-    Raccoon:    [],
-    Goat:       ['Adult', 'Baby'],
-    Sheep:      ['Adult', 'Baby'],
-    Ostrich:    ['Adult', 'Baby'],
-    Pig:        ['Adult', 'Baby'],
-    Rabbit:     ['Adult', 'Baby'],
-    Chicken:    ['White Adult', 'White Baby', 'Blue Adult', 'Blue Baby', 'Brown Adult', 'Brown Baby', 'Black Adult', 'Black Baby'],
-    Cow:        ['White Adult', 'White Baby', 'Brown Adult', 'Brown Baby'],
-    Parrot:     ['Green Adult', 'Green Baby', 'Blue Adult', 'Blue Baby', 'Golden Joja'],
-    Horse:      [],
-    Junimo:     ['White', 'Black', 'Gray', 'Pink', 'Red', 'Orange', 'Yellow', 'Green', 'Cyan', 'Purple', 'Brown'],
-}
-
 const Names: string[] = [
     'Alex',     'Raúl',     'Aitor',    'Chao',
     'Mar',      'Sara',     'Pablo',    'Laura',
@@ -54,6 +38,7 @@ type Pet = {
     name: string;
     specie: string;
     color: string;
+    twitchUserId?: string;
 }
 
 type Decoration = {
@@ -73,6 +58,7 @@ class Save {
 
 let savePath: string;
 let save = new Save();
+let sharedSaveFile: SharedJsonFile<Save> | undefined;
 
 function loadGame() {
     //Storage folder does not exist -> Create it
@@ -138,6 +124,40 @@ function loadGame() {
 
 function saveGame() {
     fs.writeFileSync(savePath, JSON.stringify(save, null, 4));
+}
+
+function updateSave(change: (latest: Save) => void) {
+    if (sharedSaveFile === undefined) {
+        change(save);
+        saveGame();
+        return;
+    }
+    save = sharedSaveFile.update(latest => {
+        change(latest);
+        return latest;
+    });
+}
+
+function showExternalSave(next: Save, previous: Save) {
+    save = next;
+    const sameDecor = JSON.stringify(previous.decoration) === JSON.stringify(next.decoration);
+    const samePets = JSON.stringify(previous.pets) === JSON.stringify(next.pets);
+    const petsAppended = previous.pets.length < next.pets.length
+        && previous.pets.every((pet, index) => JSON.stringify(pet) === JSON.stringify(next.pets[index]));
+
+    if (!sameDecor || (!samePets && !petsAppended)) {
+        webview.postMessage({ type: 'reset' });
+        initGame();
+        return;
+    }
+    if (previous.money !== next.money) {
+        webview.postMessage({ type: 'money', value: next.money });
+    }
+    if (petsAppended) {
+        for (const pet of next.pets.slice(previous.pets.length)) {
+            loadPet(pet);
+        }
+    }
 }
 
 function initGame() {
@@ -240,8 +260,9 @@ function loadPet(pet: Pet) {
 
 function addPet(pet: Pet) {
     //Add to list & save json
-    save.pets.push(pet);
-    saveGame();
+    updateSave(latest => {
+        latest.pets.push(pet);
+    });
 
     //load pet in webview
     loadPet(pet);
@@ -249,7 +270,13 @@ function addPet(pet: Pet) {
 
 function removePet(index: number, saveFile: boolean) {
     //Remove from pets
-    save.pets.splice(index, 1);
+    if (saveFile) {
+        updateSave(latest => {
+            latest.pets.splice(index, 1);
+        });
+    } else {
+        save.pets.splice(index, 1);
+    }
 
     //Remove from webview
     webview.postMessage({
@@ -257,8 +284,6 @@ function removePet(index: number, saveFile: boolean) {
         index: index,
     });
 
-    //Save pets
-    if (saveFile) saveGame();
 }
 
 //Decoration
@@ -348,6 +373,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     //Load save file
     loadGame();
+    sharedSaveFile = new SharedJsonFile<Save>(
+        savePath,
+        text => JSON.parse(text) as Save,
+        value => JSON.stringify(value, null, 4),
+    );
 
 
 
@@ -362,6 +392,26 @@ export function activate(context: vscode.ExtensionContext) {
 
     webview = new WebViewProvider(context);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(WebViewProvider.viewType, webview));
+    context.subscriptions.push(sharedSaveFile, sharedSaveFile.onDidChange(showExternalSave));
+    startTwitch(context, extensionStorageFolder, {
+        pets() {
+            return save.pets;
+        },
+        add(pet) {
+            addPet(pet);
+        },
+        remove(pet) {
+            const index = save.pets.indexOf(pet);
+            if (index < 0) {
+                return false;
+            }
+            removePet(index, true);
+            return true;
+        },
+        greet(text) {
+            webview.greet(text);
+        },
+    });
 
     vscode.workspace.onDidChangeConfiguration(event => {
         //Update config
@@ -491,7 +541,7 @@ export function activate(context: vscode.ExtensionContext) {
         webview.postMessage({ type: 'reset' });
 
         //Reload save file
-        loadGame();
+        save = sharedSaveFile?.reload() ?? save;
 
         //Init game again
         initGame();
@@ -532,6 +582,8 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'stardew-pets';
 
     private view?: vscode.WebviewView;
+    private listening = false;
+    private greetings: string[] = [];
 
     constructor(private readonly context: vscode.ExtensionContext) { }
 
@@ -539,9 +591,26 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage(message);
     }
 
+    public greet(text: string) {
+        if (this.view === undefined || !this.listening) {
+            this.greetings.push(text);
+            return;
+        }
+        void this.view.webview.postMessage({ type: 'message', value: text });
+    }
+
+    public showHeldGreetings() {
+        const texts = this.greetings;
+        this.greetings = [];
+        for (const text of texts) {
+            void this.view?.webview.postMessage({ type: 'message', value: text });
+        }
+    }
+
     public async resolveWebviewView(webviewView: vscode.WebviewView, context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken) {
         //Needed so we can use it in postMessageToWebview
         this.view = webviewView;
+        this.listening = false;
 
         //Get webview
         const webview = webviewView.webview;
@@ -569,13 +638,16 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
 
                 //Init pets
                 case 'init':
+                    this.listening = true;
                     initGame();
+                    this.showHeldGreetings();
                     break;
 
                 //Update money
                 case 'money':
-                    save.money = message.value;
-                    saveGame();
+                    updateSave(latest => {
+                        latest.money = message.value;
+                    });
                     break;
 
                 //Spawn monster
@@ -601,14 +673,14 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
                 case 'move_decor': {
                     //Get decoration
                     const index = message.index;
-                    const decoration = save.decoration[index];
-
-                    //Update position
-                    decoration.x = message.x;
-                    decoration.y = message.y;
-
-                    //Save game
-                    saveGame();
+                    updateSave(latest => {
+                        const decoration = latest.decoration[index];
+                        if (decoration === undefined) {
+                            return;
+                        }
+                        decoration.x = message.x;
+                        decoration.y = message.y;
+                    });
                     break;
                 }
 
@@ -622,20 +694,18 @@ export class WebViewProvider implements vscode.WebviewViewProvider {
                     };
 
                     //Add decoration to list
-                    save.decoration.push(decoration);
-
-                    //Save game
-                    saveGame();
+                    updateSave(latest => {
+                        latest.decoration.push(decoration);
+                    });
                     break;
                 }
 
                 case 'remove_decor': {
                     //Get decoration
                     const index = message.index;
-                    save.decoration.splice(index, 1);
-
-                    //Save game
-                    saveGame();
+                    updateSave(latest => {
+                        latest.decoration.splice(index, 1);
+                    });
                     break;
                 }
             }
