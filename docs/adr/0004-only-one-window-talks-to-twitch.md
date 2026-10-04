@@ -1,9 +1,7 @@
 # Only one editor window talks to Twitch
 
-The save lives in global storage, so every open editor window reads and writes the same farm. Left alone, two windows would each answer the same Redemption with their own Pet and then overwrite each other's save. Rather than synchronise the save across windows, which is a much larger piece of work, the window that takes a lock file next to the save owns the Twitch connection and the others run exactly as they do today, with no Twitch at all.
-
-This decision is recorded ahead of the implementation: no lock file is taken yet, and nothing below describes behaviour the extension has today.
+The farm lives in global storage, so every open editor window shares it. Only the window that takes a lock file next to the save file talks to Twitch and answers Redemptions. Save-file writes are separately serialised through a short-lived lock, always start from the latest file contents, and every window watches the file for changes so a Pet arriving in one window appears immediately in the others.
 
 ## Consequences
 
-Which window drives Twitch is whichever one started first, and nothing in the interface explains that. Two windows still write the same save on unrelated actions, so the pre-existing last-writer-wins behaviour is untouched; this decision deliberately does not fix it.
+Which window drives Twitch is whichever one started first, and nothing in the interface explains that. Other windows do not open duplicate EventSub connections, but their farm views stay current and unrelated writes such as money or decoration changes cannot overwrite a newly arrived Pet with stale state.

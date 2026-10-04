@@ -20,6 +20,8 @@ export type RedemptionDesk = {
     settle(status: 'FULFILLED' | 'CANCELED'): Promise<void>;
 };
 
+export type RedemptionLog = (message: string) => void;
+
 // Glyphs in media/fonts/StardewValley.ttf. Accents are judged after the nameplate strips them; the stored name keeps them.
 const NAMEPLATE_FONT = new Set("!\"#$%&'()*+,-./0123456789:;=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz{}~");
 const VIEWER_PET_LIMIT = 10;
@@ -31,18 +33,26 @@ export async function honourAddPet(
     desk: RedemptionDesk,
     species: SpeciesCatalog,
     random: () => number = Math.random,
+    log: RedemptionLog = () => {},
 ): Promise<void> {
     if (redemption.rewardTitle !== addPetRewardTitle) {
         return;
     }
     const choice = readChoice(redemption.userInput, species, random);
     if (choice === undefined) {
+        log(`add canceled for ${redemption.userName} (${redemption.userLogin}): invalid Pet choice ${JSON.stringify(redemption.userInput)}`);
         await desk.settle('CANCELED');
         return;
     }
     const pets = farm.pets();
     const owned = pets.filter(pet => pet.twitchUserId === redemption.userId).length;
-    if (pets.length >= FARM_PET_LIMIT || owned >= VIEWER_PET_LIMIT) {
+    if (pets.length >= FARM_PET_LIMIT) {
+        log(`add canceled for ${redemption.userName} (${redemption.userLogin}): farm limit (${FARM_PET_LIMIT}); requested ${choice.specie}${choice.color ? `, ${choice.color}` : ''}`);
+        await desk.settle('CANCELED');
+        return;
+    }
+    if (owned >= VIEWER_PET_LIMIT) {
+        log(`add canceled for ${redemption.userName} (${redemption.userLogin}): Viewer limit (${VIEWER_PET_LIMIT}); requested ${choice.specie}${choice.color ? `, ${choice.color}` : ''}`);
         await desk.settle('CANCELED');
         return;
     }
@@ -52,8 +62,10 @@ export async function honourAddPet(
         color: choice.color,
         twitchUserId: redemption.userId,
     };
+    log(`adding Pet ${pet.name} (${pet.specie}${pet.color ? `, ${pet.color}` : ''}) for ${redemption.userName} (${redemption.userLogin})`);
     await desk.settle('FULFILLED');
     farm.add(pet);
+    log(`added Pet ${pet.name} (${pet.specie}${pet.color ? `, ${pet.color}` : ''}) for ${redemption.userName} (${redemption.userLogin})`);
     farm.greet(`Say hi to ${pet.name}!`);
 }
 

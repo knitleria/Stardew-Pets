@@ -9,14 +9,19 @@ test('a viewer with several pets loses a random one of their own', async () => {
         { name: 'First', specie: 'Cat', color: 'Black', twitchUserId: '99' },
         { name: 'Second', specie: 'Dog', color: 'Brown', twitchUserId: '99' },
     ]);
+    const logs: string[] = [];
 
-    await honourRemovePet(redemption(), farm, desk, () => 0.99);
+    await honourRemovePet(redemption(), farm, desk, () => 0.99, message => logs.push(message));
 
     assert.deepEqual(pets, [
         { name: 'First', specie: 'Cat', color: 'Black', twitchUserId: '99' },
     ]);
     assert.deepEqual(greetings, ['Bye Second!']);
     assert.deepEqual(settled, ['FULFILLED']);
+    assert.deepEqual(logs, [
+        'removing Pet Second (Dog, Brown) for Viewer (viewer)',
+        'removed Pet Second (Dog, Brown) for Viewer (viewer)',
+    ]);
 });
 
 test('another viewer and the farmer keep their pets', async () => {
@@ -40,12 +45,14 @@ test('a viewer with no pets of their own is refunded without a goodbye', async (
         { name: 'Other', specie: 'Dog', color: 'Brown', twitchUserId: '7' },
     ];
     const { pets, greetings, settled, farm, desk } = farmWith(existing);
+    const logs: string[] = [];
 
-    await honourRemovePet(redemption(), farm, desk);
+    await honourRemovePet(redemption(), farm, desk, Math.random, message => logs.push(message));
 
     assert.deepEqual(pets, existing);
     assert.deepEqual(greetings, []);
     assert.deepEqual(settled, ['CANCELED']);
+    assert.deepEqual(logs, ['remove canceled for Viewer (viewer): Viewer has no Pets']);
 });
 
 test('a redemption of another reward is left alone', async () => {

@@ -50,6 +50,7 @@ export function startTwitch(context: vscode.ExtensionContext, lockDir: string, f
         clock,
         twitch: createTwitchApi(),
         openSocket: openTwitchSocket,
+        forceLive: context.extensionMode === vscode.ExtensionMode.Development,
         log(message) {
             output.appendLine(message);
             console.log(message);
@@ -80,12 +81,20 @@ export function startTwitch(context: vscode.ExtensionContext, lockDir: string, f
                 return connection.settleRedemption(redemption.id, redemption.rewardId, status);
             },
         };
-        void honourAddPet(redemption, farm, desk, petSpecies).catch(reportRedemption);
-        void honourRemovePet(redemption, farm, desk).catch(reportRedemption);
+        const log = (message: string) => {
+            const line = `Twitch: ${message}`;
+            output.appendLine(line);
+            console.log(line);
+        };
+        void honourAddPet(redemption, farm, desk, petSpecies, Math.random, log).catch(error => reportRedemption(redemption.userName, error));
+        void honourRemovePet(redemption, farm, desk, Math.random, log).catch(error => reportRedemption(redemption.userName, error));
     });
 
-    function reportRedemption(error: unknown) {
+    function reportRedemption(viewerName: string, error: unknown) {
         const message = error instanceof Error ? error.message : 'Twitch redemption failed.';
+        const line = `Twitch: Redemption for ${viewerName} failed: ${message}`;
+        output.appendLine(line);
+        console.error(line);
         void vscode.window.showErrorMessage(message);
     }
 

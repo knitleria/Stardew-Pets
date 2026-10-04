@@ -143,6 +143,7 @@ export type TwitchDependencies = {
     clock: Clock;
     twitch: TwitchApi;
     openSocket: (url: string) => TwitchSocket;
+    forceLive?: boolean;
     rewardCosts?: RewardCosts;
     log?: (message: string) => void;
 };
@@ -435,7 +436,9 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             }
             await subscribe('stream.online');
             await subscribe('stream.offline');
-            const currentlyLive = await dependencies.twitch.isStreamLive(
+            // Development hosts may treat an offline channel as live so the
+            // complete Reward flow can be tested without starting a stream.
+            const currentlyLive = dependencies.forceLive === true || await dependencies.twitch.isStreamLive(
                 dependencies.clientId,
                 socketAccessToken,
                 broadcasterUserId,

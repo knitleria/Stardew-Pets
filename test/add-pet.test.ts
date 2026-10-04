@@ -12,8 +12,9 @@ const species = {
 
 test('a viewer who redeems cat, black gets a cat named with their display name', async () => {
     const { pets, greetings, settled, farm, desk } = farmWith();
+    const logs: string[] = [];
 
-    await honourAddPet(redemption({ userInput: 'cat, black' }), farm, desk, species);
+    await honourAddPet(redemption({ userInput: 'cat, black' }), farm, desk, species, Math.random, message => logs.push(message));
 
     assert.deepEqual(pets, [{
         name: 'Viewer',
@@ -23,6 +24,10 @@ test('a viewer who redeems cat, black gets a cat named with their display name',
     }]);
     assert.deepEqual(greetings, ['Say hi to Viewer!']);
     assert.deepEqual(settled, ['FULFILLED']);
+    assert.deepEqual(logs, [
+        'adding Pet Viewer (Cat, Black) for Viewer (viewer)',
+        'added Pet Viewer (Cat, Black) for Viewer (viewer)',
+    ]);
 });
 
 test('a viewer who copies the prompt literally still gets the pet', async () => {
@@ -61,10 +66,12 @@ test('a missing variant is chosen at random', async () => {
 
 test('an unreadable redemption is refunded without a pet or a greeting', async () => {
     const missingComma = farmWith();
-    await honourAddPet(redemption({ userInput: 'cat black' }), missingComma.farm, missingComma.desk, species);
+    const logs: string[] = [];
+    await honourAddPet(redemption({ userInput: 'cat black' }), missingComma.farm, missingComma.desk, species, Math.random, message => logs.push(message));
     assert.deepEqual(missingComma.pets, []);
     assert.deepEqual(missingComma.greetings, []);
     assert.deepEqual(missingComma.settled, ['CANCELED']);
+    assert.deepEqual(logs, ['add canceled for Viewer (viewer): invalid Pet choice "cat black"']);
 
     const unknownSpecie = farmWith();
     await honourAddPet(redemption({ userInput: 'dragon, red' }), unknownSpecie.farm, unknownSpecie.desk, species);
