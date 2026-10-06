@@ -46,10 +46,7 @@ export type Clock = {
     wait(ms: number): Promise<void>;
 };
 
-export type SubscriptionType =
-    | 'stream.online'
-    | 'stream.offline'
-    | 'channel.channel_points_custom_reward_redemption.add';
+export type SubscriptionType = 'channel.channel_points_custom_reward_redemption.add';
 
 export type ManagedReward = {
     id: string;
@@ -74,7 +71,6 @@ export type TwitchApi = {
     pollDeviceCode(clientId: string, deviceCode: string): Promise<DevicePoll>;
     refresh(clientId: string, refreshToken: string): Promise<TokenGrant | { rejected: true }>;
     currentUser(clientId: string, accessToken: string): Promise<{ id: string }>;
-    isStreamLive(clientId: string, accessToken: string, userId: string): Promise<boolean>;
     subscribe(input: {
         clientId: string;
         accessToken: string;
@@ -117,10 +113,7 @@ export type Redemption = {
     rewardTitle: string;
 };
 
-export type TwitchEvent =
-    | { type: 'stream.online' }
-    | { type: 'stream.offline' }
-    | { type: 'redemption'; redemption: Redemption };
+export type TwitchEvent = { type: 'redemption'; redemption: Redemption };
 
 export type TwitchConnection = {
     connect(reason: ConnectReason): Promise<void>;
@@ -128,11 +121,6 @@ export type TwitchConnection = {
     onEvent(listener: (event: TwitchEvent) => void): () => void;
     settleRedemption(redemptionId: string, rewardId: string, status: 'FULFILLED' | 'CANCELED'): Promise<void>;
     dispose(): void;
-};
-
-export type RewardCosts = {
-    add(): number;
-    remove(): number;
 };
 
 export type TwitchDependencies = {
@@ -143,8 +131,6 @@ export type TwitchDependencies = {
     clock: Clock;
     twitch: TwitchApi;
     openSocket: (url: string) => TwitchSocket;
-    forceLive?: boolean;
-    rewardCosts?: RewardCosts;
     log?: (message: string) => void;
 };
 
@@ -155,9 +141,6 @@ const EVENTSUB_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const REFRESH_LEEWAY_MS = 60_000;
 export const addPetRewardTitle = 'Добавить питомца в IDE';
 export const removePetRewardTitle = 'Удалить питомца из IDE';
-const ADD_REWARD_PROMPT = 'введи тип животного и окрас в формате {Cat, Black}';
-const DEFAULT_ADD_COST = 1000;
-const DEFAULT_REMOVE_COST = 100;
 const CHANNEL_POINTS_UNAVAILABLE = 'Twitch channel points are only available for Affiliate and Partner channels.';
 
 export function createTwitchConnection(dependencies: TwitchDependencies): TwitchConnection {
@@ -173,16 +156,8 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
     let sessionId: string | undefined;
     let socketAccessToken = '';
     let broadcasterUserId = '';
-    let redemptionSubscriptionId: string | undefined;
-    let addRewardId: string | undefined;
-    let removeRewardId: string | undefined;
     const seenMessageIds = new Set<string>();
-    const unmanagedRewardIds = new Set<string>();
     const listeners = new Set<(event: TwitchEvent) => void>();
-    const rewardCosts = dependencies.rewardCosts ?? {
-        add: () => DEFAULT_ADD_COST,
-        remove: () => DEFAULT_REMOVE_COST,
-    };
     return {
         async connect(reason) {
             log(`connecting (${reason})`);
@@ -223,7 +198,6 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         async disconnect() {
             log('disconnected');
             stopped = true;
-            await setRewardsPaused(true);
             activeSocket?.close();
             activeSocket = undefined;
         },
@@ -234,9 +208,6 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             };
         },
         settleRedemption(redemptionId, rewardId, status) {
-            if (unmanagedRewardIds.has(rewardId)) {
-                return Promise.resolve();
-            }
             return dependencies.twitch.updateRedemption({
                 clientId: dependencies.clientId,
                 accessToken: socketAccessToken,
@@ -249,7 +220,6 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         dispose() {
             log('window closed, disconnected');
             stopped = true;
-            void setRewardsPaused(true);
             activeSocket?.close();
             activeSocket = undefined;
             held?.release();
@@ -383,7 +353,6 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             dependencies.notify.showError('Twitch connection lost. Reconnecting.');
         }
         log(`reconnecting in ${delaySeconds(reconnectDelay)}s`);
-        void setRewardsPaused(true);
         reconnecting = true;
         const delay = reconnectDelay;
         reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
@@ -434,22 +403,8 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
                 followedReconnect = false;
                 return;
             }
-            await subscribe('stream.online');
-            await subscribe('stream.offline');
-            // Development hosts may treat an offline channel as live so the
-            // complete Reward flow can be tested without starting a stream.
-            const currentlyLive = dependencies.forceLive === true || await dependencies.twitch.isStreamLive(
-                dependencies.clientId,
-                socketAccessToken,
-                broadcasterUserId,
-            );
-            if (currentlyLive) {
-                redemptionSubscriptionId = (await subscribe('channel.channel_points_custom_reward_redemption.add')).id;
-                await setRewardsPaused(false);
-                log('connected, channel live');
-            } else {
-                log('connected, channel offline');
-            }
+            await subscribe('channel.channel_points_custom_reward_redemption.add');
+            log('connected');
             return;
         }
         if (message.metadata.message_type !== 'notification') {
@@ -461,30 +416,6 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
                 return;
             }
             seenMessageIds.add(messageId);
-        }
-        if (message.metadata.subscription_type === 'stream.online') {
-            log('stream online');
-            emit({ type: 'stream.online' });
-            if (redemptionSubscriptionId === undefined) {
-                redemptionSubscriptionId = (await subscribe('channel.channel_points_custom_reward_redemption.add')).id;
-            }
-            await setRewardsPaused(false);
-            return;
-        }
-        if (message.metadata.subscription_type === 'stream.offline') {
-            log('stream offline');
-            emit({ type: 'stream.offline' });
-            await setRewardsPaused(true);
-            if (redemptionSubscriptionId !== undefined) {
-                const id = redemptionSubscriptionId;
-                await dependencies.twitch.unsubscribe({
-                    clientId: dependencies.clientId,
-                    accessToken: socketAccessToken,
-                    id,
-                });
-                redemptionSubscriptionId = undefined;
-            }
-            return;
         }
         if (message.metadata.subscription_type === 'channel.channel_points_custom_reward_redemption.add') {
             const body = message.payload.event;
@@ -545,74 +476,19 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             denyChannelPoints();
             return false;
         }
-        addRewardId = await bindReward({
-            title: addPetRewardTitle,
-            cost: rewardCosts.add(),
-            prompt: ADD_REWARD_PROMPT,
-            userInputRequired: true,
-            existing: listed.rewards,
-        });
-        removeRewardId = await bindReward({
-            title: removePetRewardTitle,
-            cost: rewardCosts.remove(),
-            prompt: '',
-            userInputRequired: false,
-            existing: listed.rewards,
-        });
+        await bindReward(addPetRewardTitle, listed.rewards);
+        await bindReward(removePetRewardTitle, listed.rewards);
         return true;
     }
 
-    async function bindReward(spec: {
-        title: string;
-        cost: number;
-        prompt: string;
-        userInputRequired: boolean;
-        existing: ManagedReward[];
-    }): Promise<string | undefined> {
-        const found = spec.existing.find(reward => reward.title === spec.title);
+    function bindReward(title: string, existing: ManagedReward[]) {
+        const found = existing.find(reward => reward.title === title);
         if (found === undefined) {
-            log(`reward not found: ${spec.title}`);
-            dependencies.notify.showError(`A Twitch reward named "${spec.title}" was not found. Create it on the channel, then Connect again.`);
-            return undefined;
+            log(`reward not found: ${title}`);
+            dependencies.notify.showError(`A Twitch reward named "${title}" was not found. Create it on the channel, then Connect again.`);
+            return;
         }
-        const updated = await dependencies.twitch.updateReward({
-            clientId: dependencies.clientId,
-            accessToken: socketAccessToken,
-            broadcasterUserId,
-            id: found.id,
-            cost: spec.cost,
-            prompt: spec.prompt,
-            userInputRequired: spec.userInputRequired,
-            isEnabled: true,
-            isPaused: true,
-            skipRequestQueue: false,
-        });
-        if ('forbidden' in updated) {
-            unmanagedRewardIds.add(found.id);
-            log(`reward found, cannot change it: ${spec.title}`);
-            return found.id;
-        }
-        log(`reward found: ${spec.title}`);
-        return found.id;
-    }
-
-    async function setRewardsPaused(paused: boolean) {
-        for (const id of [addRewardId, removeRewardId]) {
-            if (id === undefined || unmanagedRewardIds.has(id)) {
-                continue;
-            }
-            const updated = await dependencies.twitch.updateReward({
-                clientId: dependencies.clientId,
-                accessToken: socketAccessToken,
-                broadcasterUserId,
-                id,
-                isPaused: paused,
-            });
-            if ('forbidden' in updated) {
-                denyChannelPoints();
-                return;
-            }
-        }
+        log(`reward found: ${title}`);
     }
 
     function denyChannelPoints() {

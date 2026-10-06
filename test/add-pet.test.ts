@@ -217,6 +217,52 @@ test('pets the farmer added by hand do not fill a viewer slot', async () => {
     assert.deepEqual(settled, ['FULFILLED']);
 });
 
+test('a Twitch error while adding a pet refunds the points', async () => {
+    const { pets, greetings, settled, farm } = farmWith();
+
+    await assert.rejects(
+        () => honourAddPet(redemption({ userInput: 'cat, black' }), farm, {
+            async settle(status) {
+                settled.push(status);
+                if (status === 'FULFILLED') {
+                    throw new Error('Twitch request failed (503).');
+                }
+            },
+        }, species),
+        /503/,
+    );
+
+    assert.deepEqual(pets, []);
+    assert.deepEqual(greetings, []);
+    assert.deepEqual(settled, ['FULFILLED', 'CANCELED']);
+});
+
+test('an error before the pet is saved refunds the points', async () => {
+    const { greetings, settled, desk } = farmWith();
+    const farm = {
+        pets() {
+            throw new Error('save unreadable');
+        },
+        add() {
+            throw new Error('should not add');
+        },
+        remove() {
+            return false;
+        },
+        greet() {
+            throw new Error('should not greet');
+        },
+    };
+
+    await assert.rejects(
+        () => honourAddPet(redemption({ userInput: 'cat, black' }), farm, desk, species),
+        /save unreadable/,
+    );
+
+    assert.deepEqual(greetings, []);
+    assert.deepEqual(settled, ['CANCELED']);
+});
+
 test('every specie can be added from a redemption', async () => {
     assert.deepEqual(Object.keys(petSpecies), [
         'Cat', 'Dog', 'Turtle', 'Dino', 'Duck', 'Raccoon', 'Goat', 'Sheep',

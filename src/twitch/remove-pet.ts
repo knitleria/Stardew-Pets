@@ -1,4 +1,4 @@
-import { type Farm, type RedemptionDesk, type RedemptionLog } from './add-pet.ts';
+import { refundRedemption, type Farm, type RedemptionDesk, type RedemptionLog } from './add-pet.ts';
 import { removePetRewardTitle, type Redemption } from './connection.ts';
 
 export type { SavedPet } from './add-pet.ts';
@@ -13,6 +13,25 @@ export async function honourRemovePet(
     if (redemption.rewardTitle !== removePetRewardTitle) {
         return;
     }
+    let removedName: string | undefined;
+    try {
+        removedName = await removeChosenPet(redemption, farm, desk, random, log);
+    } catch (error) {
+        await refundRedemption(desk);
+        throw error;
+    }
+    if (removedName !== undefined) {
+        farm.greet(`Bye ${removedName}!`);
+    }
+}
+
+async function removeChosenPet(
+    redemption: Redemption,
+    farm: Farm,
+    desk: RedemptionDesk,
+    random: () => number,
+    log: RedemptionLog,
+): Promise<string | undefined> {
     const owned = farm.pets().filter(pet => pet.twitchUserId === redemption.userId);
     if (owned.length === 0) {
         log(`remove canceled for ${redemption.userName} (${redemption.userLogin}): Viewer has no Pets`);
@@ -34,5 +53,5 @@ export async function honourRemovePet(
         throw error;
     }
     log(`removed Pet ${pet.name} (${pet.specie}${pet.color ? `, ${pet.color}` : ''}) for ${redemption.userName} (${redemption.userLogin})`);
-    farm.greet(`Bye ${pet.name}!`);
+    return pet.name;
 }

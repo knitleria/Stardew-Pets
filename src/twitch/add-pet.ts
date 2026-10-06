@@ -27,6 +27,14 @@ const NAMEPLATE_FONT = new Set("!\"#$%&'()*+,-./0123456789:;=>?@ABCDEFGHIJKLMNOP
 const VIEWER_PET_LIMIT = 10;
 const FARM_PET_LIMIT = 50;
 
+export async function refundRedemption(desk: RedemptionDesk): Promise<void> {
+    try {
+        await desk.settle('CANCELED');
+    } catch {
+        // The caller reports the original error. A failed refund must not hide it.
+    }
+}
+
 export async function honourAddPet(
     redemption: Redemption,
     farm: Farm,
@@ -38,6 +46,26 @@ export async function honourAddPet(
     if (redemption.rewardTitle !== addPetRewardTitle) {
         return;
     }
+    let delivered: SavedPet | undefined;
+    try {
+        delivered = await addChosenPet(redemption, farm, desk, species, random, log);
+    } catch (error) {
+        await refundRedemption(desk);
+        throw error;
+    }
+    if (delivered !== undefined) {
+        farm.greet(`Say hi to ${delivered.name}!`);
+    }
+}
+
+async function addChosenPet(
+    redemption: Redemption,
+    farm: Farm,
+    desk: RedemptionDesk,
+    species: SpeciesCatalog,
+    random: () => number,
+    log: RedemptionLog,
+): Promise<SavedPet | undefined> {
     const choice = readChoice(redemption.userInput, species, random);
     if (choice === undefined) {
         log(`add canceled for ${redemption.userName} (${redemption.userLogin}): invalid Pet choice ${JSON.stringify(redemption.userInput)}`);
@@ -64,9 +92,14 @@ export async function honourAddPet(
     };
     log(`adding Pet ${pet.name} (${pet.specie}${pet.color ? `, ${pet.color}` : ''}) for ${redemption.userName} (${redemption.userLogin})`);
     await desk.settle('FULFILLED');
-    farm.add(pet);
+    try {
+        farm.add(pet);
+    } catch (error) {
+        farm.remove(pet);
+        throw error;
+    }
     log(`added Pet ${pet.name} (${pet.specie}${pet.color ? `, ${pet.color}` : ''}) for ${redemption.userName} (${redemption.userLogin})`);
-    farm.greet(`Say hi to ${pet.name}!`);
+    return pet;
 }
 
 function petName(userName: string, userLogin: string): string {

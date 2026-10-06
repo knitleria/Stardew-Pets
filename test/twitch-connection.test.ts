@@ -361,7 +361,7 @@ test('closing the window releases the lock', async () => {
     assert.equal(secondCalls, 1);
 });
 
-test('a saved token opens one EventSub socket and subscribes to stream online and offline', async () => {
+test('a saved token opens one EventSub socket and subscribes to redemptions while the channel is offline', async () => {
     const secrets = memorySecrets();
     await secrets.store(twitchTokenKey, JSON.stringify({
         accessToken: 'access-token',
@@ -370,7 +370,6 @@ test('a saved token opens one EventSub socket and subscribes to stream online an
     }));
     const sockets: FakeSocket[] = [];
     const subscriptions: Array<{ type: string; sessionId: string; broadcasterUserId: string; accessToken: string }> = [];
-    const liveChecks: string[] = [];
     const connection = createTwitchConnection({
         clientId: 'client-id',
         lockDir: tempLockDir(),
@@ -396,10 +395,7 @@ test('a saved token opens one EventSub socket and subscribes to stream online an
                 assert.equal(accessToken, 'access-token');
                 return { id: '42' };
             },
-            async isStreamLive(_clientId, accessToken, userId) {
-                liveChecks.push(`${accessToken} ${userId}`);
-                return false;
-            },
+
             async subscribe(input) {
                 subscriptions.push({
                     type: input.type,
@@ -425,10 +421,8 @@ test('a saved token opens one EventSub socket and subscribes to stream online an
     });
 
     assert.equal(sockets[0].url, 'wss://eventsub.wss.twitch.tv/ws');
-    assert.deepEqual(liveChecks, ['access-token 42']);
     assert.deepEqual(subscriptions, [
-        { type: 'stream.online', sessionId: 'session-1', broadcasterUserId: '42', accessToken: 'access-token' },
-        { type: 'stream.offline', sessionId: 'session-1', broadcasterUserId: '42', accessToken: 'access-token' },
+        { type: 'channel.channel_points_custom_reward_redemption.add', sessionId: 'session-1', broadcasterUserId: '42', accessToken: 'access-token' },
     ]);
 });
 
@@ -463,7 +457,7 @@ test('a subscription Twitch already has is removed and created for this socket',
     await flush();
 
     assert.deepEqual(removed, ['95211013-927c-4437-b0fe-4d6c4874da13']);
-    assert.deepEqual(created, ['stream.online', 'stream.offline']);
+    assert.deepEqual(created, ['channel.channel_points_custom_reward_redemption.add']);
 });
 
 test('Twitch names the subscription that already exists', () => {
@@ -496,12 +490,12 @@ test('connect and disconnect are written to the log', async () => {
         'Twitch: connecting (startup)',
         'Twitch: reward found: Добавить питомца в IDE',
         'Twitch: reward found: Удалить питомца из IDE',
-        'Twitch: connected, channel offline',
+        'Twitch: connected',
         'Twitch: disconnected',
     ]);
 });
 
-test('a live channel also subscribes to reward redemptions', async () => {
+test('welcome subscribes to reward redemptions and not to stream status', async () => {
     const secrets = memorySecrets();
     await secrets.store(twitchTokenKey, JSON.stringify({
         accessToken: 'access-token',
@@ -534,9 +528,7 @@ test('a live channel also subscribes to reward redemptions', async () => {
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return true;
-            },
+
             async subscribe(input) {
                 types.push(input.type);
                 return { id: `sub-${types.length}` };
@@ -556,13 +548,11 @@ test('a live channel also subscribes to reward redemptions', async () => {
     });
 
     assert.deepEqual(types, [
-        'stream.online',
-        'stream.offline',
         'channel.channel_points_custom_reward_redemption.add',
     ]);
 });
 
-test('stream.online while offline subscribes to redemptions and reports the event', async () => {
+test('a stream.online notification does not add a subscription or an event', async () => {
     const secrets = memorySecrets();
     await secrets.store(twitchTokenKey, JSON.stringify({
         accessToken: 'access-token',
@@ -596,9 +586,7 @@ test('stream.online while offline subscribes to redemptions and reports the even
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe(input) {
                 types.push(input.type);
                 return { id: `sub-${types.length}` };
@@ -620,15 +608,13 @@ test('stream.online while offline subscribes to redemptions and reports the even
     sockets[0].receive(notification('msg-online', 'stream.online'));
     await flush();
 
-    assert.deepEqual(events, [{ type: 'stream.online' }]);
+    assert.deepEqual(events, []);
     assert.deepEqual(types, [
-        'stream.online',
-        'stream.offline',
         'channel.channel_points_custom_reward_redemption.add',
     ]);
 });
 
-test('stream.offline removes the redemption subscription and reports the event', async () => {
+test('a stream.offline notification keeps the redemption subscription', async () => {
     const secrets = memorySecrets();
     await secrets.store(twitchTokenKey, JSON.stringify({
         accessToken: 'access-token',
@@ -662,9 +648,7 @@ test('stream.offline removes the redemption subscription and reports the event',
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return true;
-            },
+
             async subscribe(input) {
                 return {
                     id: input.type === 'channel.channel_points_custom_reward_redemption.add' ? 'redemption-sub' : 'status-sub',
@@ -690,8 +674,8 @@ test('stream.offline removes the redemption subscription and reports the event',
     sockets[0].receive(notification('msg-offline', 'stream.offline'));
     await flush();
 
-    assert.deepEqual(events, [{ type: 'stream.offline' }]);
-    assert.deepEqual(removed, ['access-token redemption-sub']);
+    assert.deepEqual(events, []);
+    assert.deepEqual(removed, []);
 });
 
 test('a redemption notification is reported once per message id', async () => {
@@ -727,9 +711,7 @@ test('a redemption notification is reported once per message id', async () => {
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return true;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -804,9 +786,7 @@ test('disconnect closes the socket and keeps the saved token', async () => {
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -871,9 +851,7 @@ test('an access token near expiry is refreshed and the saved refresh token is re
                 usedAccess.push(accessToken);
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -951,9 +929,7 @@ test('a fresh access token is refreshed one minute before it expires', async () 
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -1099,9 +1075,7 @@ test('a rejected refresh asks the farmer for a new code', async () => {
                 usedAccess.push(accessToken);
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -1168,9 +1142,7 @@ test('a dropped socket reconnects after 1s, 2s, 4s, 8s, 16s, 32s, then a minute'
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -1242,9 +1214,7 @@ test('session_reconnect moves to the new socket without subscribing again', asyn
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 subscriptions += 1;
                 return { id: `sub-${subscriptions}` };
@@ -1321,9 +1291,7 @@ test('a dropped connection is announced once until Twitch welcomes again', async
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -1402,9 +1370,7 @@ test('the connect command opens the socket after the code is approved', async ()
             async currentUser() {
                 return { id: '42' };
             },
-            async isStreamLive() {
-                return false;
-            },
+
             async subscribe() {
                 return { id: 'sub' };
             },
@@ -1460,10 +1426,7 @@ test('connect without a client id reports an error and does not call Twitch', as
                 calls += 1;
                 throw new Error('twitch');
             },
-            async isStreamLive() {
-                calls += 1;
-                return false;
-            },
+
             async subscribe() {
                 calls += 1;
                 return { id: 'sub' };
@@ -1610,31 +1573,14 @@ test('connect finds the channel rewards by title instead of creating them', asyn
 
     await connection.connect('startup');
 
-    assert.deepEqual(updated, [
-        {
-            id: 'add-existing',
-            cost: 1000,
-            prompt: 'введи тип животного и окрас в формате {Cat, Black}',
-            isPaused: true,
-            isEnabled: true,
-            skipRequestQueue: false,
-        },
-        {
-            id: 'remove-existing',
-            cost: 100,
-            prompt: '',
-            isPaused: true,
-            isEnabled: true,
-            skipRequestQueue: false,
-        },
-    ]);
+    assert.deepEqual(updated, []);
 });
 
-test('a live channel unpauses both rewards after the redemption subscription is in place', async () => {
+test('connecting does not pause or unpause rewards', async () => {
     const updated: Array<{ id: string; isPaused?: boolean }> = [];
     const sockets: FakeSocket[] = [];
     const { connection } = await savedTokenConnection({
-        live: true,
+
         twitch: {
             async listRewards() {
                 return {
@@ -1661,11 +1607,11 @@ test('a live channel unpauses both rewards after the redemption subscription is 
     sockets[0].receive(sessionWelcome('session-1'));
     await flush();
 
-    assert.equal(pausedAtConnect, 2);
-    assert.deepEqual(updated.filter(update => update.isPaused === false).map(update => update.id), ['reward-1', 'reward-2']);
+    assert.equal(pausedAtConnect, 0);
+    assert.deepEqual(updated.filter(update => update.isPaused === false), []);
 });
 
-test('an offline channel leaves both rewards paused after EventSub welcomes', async () => {
+test('an offline channel does not pause rewards when EventSub welcomes', async () => {
     const paused: boolean[] = [];
     const sockets: FakeSocket[] = [];
     const { connection } = await savedTokenConnection({
@@ -1688,14 +1634,14 @@ test('an offline channel leaves both rewards paused after EventSub welcomes', as
     sockets[0].receive(sessionWelcome('session-1'));
     await flush();
 
-    assert.deepEqual(paused, [true, true]);
+    assert.deepEqual(paused, []);
 });
 
-test('stream.offline pauses both rewards', async () => {
+test('stream.offline does not pause rewards', async () => {
     const paused: boolean[] = [];
     const sockets: FakeSocket[] = [];
     const { connection } = await savedTokenConnection({
-        live: true,
+
         twitch: {
             async listRewards() {
                 return {
@@ -1725,10 +1671,10 @@ test('stream.offline pauses both rewards', async () => {
     sockets[0].receive(notification('msg-offline', 'stream.offline'));
     await flush();
 
-    assert.deepEqual(paused, [true, true, false, false, true, true]);
+    assert.deepEqual(paused, []);
 });
 
-test('stream.online unpauses both rewards after subscribing to redemptions', async () => {
+test('stream.online does not unpause rewards', async () => {
     const paused: boolean[] = [];
     const types: string[] = [];
     const sockets: FakeSocket[] = [];
@@ -1767,17 +1713,15 @@ test('stream.online unpauses both rewards after subscribing to redemptions', asy
     await flush();
 
     assert.deepEqual(types, [
-        'stream.online',
-        'stream.offline',
         'channel.channel_points_custom_reward_redemption.add',
     ]);
-    assert.deepEqual(paused, [true, true, false, false]);
+    assert.deepEqual(paused, []);
 });
 
-test('disconnect pauses both rewards and keeps the saved token', async () => {
+test('disconnect keeps the saved token and does not pause rewards', async () => {
     const paused: boolean[] = [];
     const { connection, secrets } = await savedTokenConnection({
-        live: true,
+
         twitch: {
             async listRewards() {
                 return {
@@ -1799,14 +1743,14 @@ test('disconnect pauses both rewards and keeps the saved token', async () => {
     await connection.connect('startup');
     await connection.disconnect();
 
-    assert.deepEqual(paused, [true, true, true, true]);
+    assert.deepEqual(paused, []);
     assert.equal(secrets.stored().length, 1);
 });
 
-test('closing the window pauses both rewards', async () => {
+test('closing the window does not pause rewards', async () => {
     const paused: boolean[] = [];
     const { connection } = await savedTokenConnection({
-        live: true,
+
         twitch: {
             async listRewards() {
                 return {
@@ -1829,16 +1773,16 @@ test('closing the window pauses both rewards', async () => {
     connection.dispose();
     await flush();
 
-    assert.deepEqual(paused, [true, true, true, true]);
+    assert.deepEqual(paused, []);
 });
 
-test('a reward Twitch will not let the app change is kept and not settled through the API', async () => {
+test('finding rewards does not change them, and redemptions are still settled', async () => {
     const errors: string[] = [];
     const rewardUpdates: string[] = [];
     const redemptions: string[] = [];
     const sockets: FakeSocket[] = [];
     const { connection } = await savedTokenConnection({
-        live: true,
+
         notify: {
             showCode() {
                 throw new Error('unexpected code');
@@ -1881,8 +1825,8 @@ test('a reward Twitch will not let the app change is kept and not settled throug
     await connection.settleRedemption('redemption-2', 'remove-id', 'CANCELED');
 
     assert.deepEqual(errors, []);
-    assert.deepEqual(rewardUpdates, ['foreign-add', 'remove-id', 'remove-id']);
-    assert.deepEqual(redemptions, ['remove-id']);
+    assert.deepEqual(rewardUpdates, []);
+    assert.deepEqual(redemptions, ['foreign-add', 'remove-id']);
 });
 
 test('a channel without channel points is told that Twitch features are unavailable', async () => {
@@ -1943,11 +1887,11 @@ test('a channel without channel points does not open EventSub', async () => {
     assert.deepEqual(sockets, []);
 });
 
-test('a dropped socket pauses both rewards before it waits to reconnect', async () => {
+test('a dropped socket does not pause rewards before it reconnects', async () => {
     const paused: boolean[] = [];
     const sockets: FakeSocket[] = [];
     const { connection } = await savedTokenConnection({
-        live: true,
+
         notify: {
             showCode() {
                 throw new Error('unexpected code');
@@ -1985,16 +1929,12 @@ test('a dropped socket pauses both rewards before it waits to reconnect', async 
     sockets[0].drop();
     await flush();
 
-    assert.deepEqual(paused.slice(-2), [true, true]);
+    assert.deepEqual(paused, []);
 });
 
-test('reward costs come from the farmer settings', async () => {
+test('connect does not write reward costs onto the channel', async () => {
     const costs: number[] = [];
     const { connection } = await savedTokenConnection({
-        rewardCosts: {
-            add: () => 2500,
-            remove: () => 50,
-        },
         twitch: {
             async updateReward(input) {
                 if (input.cost !== undefined) {
@@ -2007,7 +1947,7 @@ test('reward costs come from the farmer settings', async () => {
 
     await connection.connect('startup');
 
-    assert.deepEqual(costs, [2500, 50]);
+    assert.deepEqual(costs, []);
 });
 
 test('settling a redemption tells Twitch whether it was fulfilled or refunded', async () => {
@@ -2150,11 +2090,9 @@ function signInDependencies(lockDir: string, onDeviceCode: () => void) {
 }
 
 function savedTokenConnection(options: {
-    live?: boolean;
     twitch?: Partial<TwitchApi>;
     openSocket?: (url: string) => FakeSocket;
     notify?: { showCode(code: string, uri: string): void; showError(message: string): void };
-    rewardCosts?: { add(): number; remove(): number };
     log?: (message: string) => void;
 } = {}) {
     const secrets = memorySecrets();
@@ -2179,13 +2117,10 @@ function savedTokenConnection(options: {
             clock: { now: () => 1_700_000_000_000, wait: () => new Promise<void>(() => undefined) },
             twitch: {
                 ...quietSession(),
-                async isStreamLive() {
-                    return options.live === true;
-                },
+
                 ...options.twitch,
             },
             openSocket: options.openSocket ?? ((url: string) => new FakeSocket(url)),
-            rewardCosts: options.rewardCosts,
             log: options.log,
         }),
     }));
@@ -2205,9 +2140,7 @@ function quietSession() {
         async currentUser() {
             return { id: '42' };
         },
-        async isStreamLive() {
-            return false;
-        },
+
         async subscribe() {
             return { id: 'sub' };
         },

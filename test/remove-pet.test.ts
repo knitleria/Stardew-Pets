@@ -108,6 +108,54 @@ test('what the viewer typed does not choose which pet leaves', async () => {
     assert.deepEqual(greetings, ['Bye Mine!']);
 });
 
+test('a Twitch error while removing a pet refunds the points', async () => {
+    const { pets, greetings, settled, farm } = farmWith([
+        { name: 'Mine', specie: 'Cat', color: 'Black', twitchUserId: '99' },
+    ]);
+
+    await assert.rejects(
+        () => honourRemovePet(redemption(), farm, {
+            async settle(status) {
+                settled.push(status);
+                if (status === 'FULFILLED') {
+                    throw new Error('Twitch request failed (503).');
+                }
+            },
+        }),
+        /503/,
+    );
+
+    assert.equal(pets[0]?.name, 'Mine');
+    assert.deepEqual(greetings, []);
+    assert.deepEqual(settled, ['FULFILLED', 'CANCELED']);
+});
+
+test('an error before a pet is removed refunds the points', async () => {
+    const { greetings, settled, desk } = farmWith([]);
+    const farm = {
+        pets() {
+            throw new Error('save unreadable');
+        },
+        add() {
+            throw new Error('should not add');
+        },
+        remove() {
+            return false;
+        },
+        greet() {
+            throw new Error('should not greet');
+        },
+    };
+
+    await assert.rejects(
+        () => honourRemovePet(redemption(), farm, desk),
+        /save unreadable/,
+    );
+
+    assert.deepEqual(greetings, []);
+    assert.deepEqual(settled, ['CANCELED']);
+});
+
 test('a freed slot counts toward the viewer limit immediately', async () => {
     const existing = Array.from({ length: 10 }, (_, index): SavedPet => ({
         name: `Pet${index}`,

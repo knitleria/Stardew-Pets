@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Nameplates are drawn on the canvas, never as DOM elements. See `docs/adr/0001-nameplates-drawn-on-the-canvas.md`.
+- Nameplates are HTML above the canvas, outside the scaled canvas. See `docs/adr/0001-nameplates-sit-outside-the-scaled-canvas.md`. The canvas-drawing steps below are the approach this plan shipped, and they have since been replaced.
 - `media/main.js` is a build artefact produced by `npm run build-game`. Never edit it by hand.
 - TypeScript runs with `"strict": true`. `npm run compile` must stay clean.
 - No new runtime or dev dependencies.
