@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createTwitchConnection, twitchTokenKey, type RewardUpdateInput, type TwitchApi } from '../src/twitch/connection.ts';
 import { existingSubscriptionId } from '../src/twitch/live.ts';
+import { petSpecies } from '../src/pets/catalog.ts';
+import { honourAddPet, type Farm, type SavedPet } from '../src/twitch/add-pet.ts';
+import { honourRemovePet } from '../src/twitch/remove-pet.ts';
 
 test('connect command without a saved token shows the device code and stores the granted tokens', async () => {
     const secrets = memorySecrets();
@@ -488,8 +491,6 @@ test('connect and disconnect are written to the log', async () => {
 
     assert.deepEqual(lines, [
         'Twitch: connecting (startup)',
-        'Twitch: reward found: Добавить питомца в IDE',
-        'Twitch: reward found: Удалить питомца из IDE',
         'Twitch: connected',
         'Twitch: disconnected',
     ]);
@@ -1499,19 +1500,74 @@ test('a socket error is shown once and the connection retries', async () => {
     assert.equal(sockets.length, 2);
 });
 
-test('connect does not create rewards and asks the farmer when they are missing', async () => {
-    const secrets = memorySecrets();
-    await secrets.store(twitchTokenKey, JSON.stringify({
-        accessToken: 'access-token',
-        refreshToken: 'refresh-token',
-        expiresAt: 1_700_014_400_000,
-    }));
+for (const { name, rewards } of [
+    { name: 'no Rewards', rewards: [] },
+    { name: 'only Cat and Dog Rewards', rewards: [
+        { id: 'cat-id', title: 'Добавить кота в IDE' },
+        { id: 'dog-id', title: 'Добавить собаку в IDE' },
+    ] },
+    { name: 'only unrelated Rewards', rewards: [
+        { id: 'other-id', title: 'Other reward' },
+    ] },
+    { name: 'disabled and paused Rewards', rewards: [
+        { id: 'cat-id', title: 'Добавить кота в IDE', isEnabled: false, isPaused: true },
+    ] },
+]) {
+    test(`connect with ${name} succeeds without changing Rewards or reporting missing ones`, async t => {
+        const errors: string[] = [];
+        const updated: RewardUpdateInput[] = [];
+        const sockets: FakeSocket[] = [];
+        const lines: string[] = [];
+        const { connection } = await savedTokenConnection({
+            notify: {
+                showCode() {
+                    throw new Error('unexpected code');
+                },
+                showError(message) {
+                    errors.push(message);
+                },
+            },
+            twitch: {
+                async listRewards() {
+                    return { rewards };
+                },
+                async updateReward(input) {
+                    updated.push(input);
+                    return { ok: true as const };
+                },
+            },
+            openSocket(url) {
+                const socket = new FakeSocket(url);
+                sockets.push(socket);
+                return socket;
+            },
+            log(message) {
+                lines.push(message);
+            },
+        });
+        t.after(() => connection.dispose());
+
+        await connection.connect('startup');
+        assert.equal(sockets.length, 1);
+        sockets[0].receive(sessionWelcome('session-1'));
+        await flush();
+
+        assert.deepEqual(updated, []);
+        assert.deepEqual(errors, []);
+        assert.deepEqual(lines, ['Twitch: connecting (startup)', 'Twitch: connected']);
+    });
+}
+
+test('Rewards created, renamed or recreated while connected work without a stream or reconnect', async t => {
+    const sockets: FakeSocket[] = [];
     const errors: string[] = [];
     const updated: RewardUpdateInput[] = [];
-    const connection = createTwitchConnection({
-        clientId: 'client-id',
-        lockDir: tempLockDir(),
-        secrets,
+    const subscriptions: string[] = [];
+    const pets: SavedPet[] = [];
+    const greetings: string[] = [];
+    const pending: Promise<void>[] = [];
+    let rewardLists = 0;
+    const { connection } = await savedTokenConnection({
         notify: {
             showCode() {
                 throw new Error('unexpected code');
@@ -1520,11 +1576,14 @@ test('connect does not create rewards and asks the farmer when they are missing'
                 errors.push(message);
             },
         },
-        clock: { now: () => 1_700_000_000_000, wait: () => new Promise<void>(() => undefined) },
         twitch: {
-            ...quietSession(),
             async listRewards() {
+                rewardLists += 1;
                 return { rewards: [] };
+            },
+            async subscribe(input) {
+                subscriptions.push(input.type);
+                return { id: 'redemption-sub' };
             },
             async updateReward(input) {
                 updated.push(input);
@@ -1532,27 +1591,84 @@ test('connect does not create rewards and asks the farmer when they are missing'
             },
         },
         openSocket(url) {
-            return new FakeSocket(url);
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
         },
+    });
+    t.after(() => connection.dispose());
+    const farm: Farm = {
+        pets: () => pets,
+        add(pet) {
+            pets.push(pet);
+        },
+        remove(pet) {
+            const index = pets.indexOf(pet);
+            if (index < 0) {
+                return false;
+            }
+            pets.splice(index, 1);
+            return true;
+        },
+        greet(text) {
+            greetings.push(text);
+        },
+    };
+    connection.onEvent(event => {
+        const redemption = event.redemption;
+        pending.push(
+            honourAddPet(redemption, farm, petSpecies, () => 0),
+            honourRemovePet(redemption, farm, () => 0),
+        );
     });
 
     await connection.connect('startup');
+    sockets[0].receive(sessionWelcome('session-1'));
+    await flush();
+    sockets[0].receive(notification('offline-1', 'stream.offline'));
 
-    assert.deepEqual(updated, []);
-    assert.deepEqual(errors, [
-        'A Twitch reward named "Добавить питомца в IDE" was not found. Create it on the channel, then Connect again.',
-        'A Twitch reward named "Удалить питомца из IDE" was not found. Create it on the channel, then Connect again.',
+    await redeem('cat-1', 'new-cat', 'Добавить кота в IDE', '');
+    await redeem('junimo-1', 'new-junimo', 'Добавить джунимо в IDE', 'purple');
+    assert.deepEqual(pets.map(pet => [pet.specie, pet.color]), [['Cat', 'Black'], ['Junimo', 'Purple']]);
+
+    await redeem('renamed-1', 'new-cat', 'Other reward', 'black');
+    await redeem('legacy-1', 'legacy-add', 'Добавить питомца в IDE', 'cat, black');
+    assert.equal(pets.length, 2);
+
+    await redeem('dog-1', 'new-cat', 'Добавить собаку в IDE', 'dark brown');
+    await redeem('cat-2', 'recreated-cat', 'Добавить кота в IDE', 'RaNdOm');
+    assert.deepEqual(pets.map(pet => [pet.specie, pet.color]), [
+        ['Cat', 'Black'], ['Junimo', 'Purple'], ['Dog', 'Dark Brown'], ['Cat', 'Black'],
     ]);
+
+    await redeem('remove-1', 'new-remove', 'Удалить питомца из IDE', '');
+    assert.deepEqual(pets.map(pet => [pet.specie, pet.color]), [
+        ['Junimo', 'Purple'], ['Dog', 'Dark Brown'], ['Cat', 'Black'],
+    ]);
+    assert.deepEqual(greetings, [
+        'Say hi to Viewer!', 'Say hi to Viewer!', 'Say hi to Viewer!', 'Say hi to Viewer!', 'Bye Viewer!',
+    ]);
+    assert.equal(sockets.length, 1);
+    assert.equal(rewardLists, 1);
+    assert.deepEqual(subscriptions, ['channel.channel_points_custom_reward_redemption.add']);
+    assert.deepEqual(updated, []);
+    assert.deepEqual(errors, []);
+
+    async function redeem(redemptionId: string, rewardId: string, rewardTitle: string, userInput: string) {
+        sockets[0].receive(redemptionNotification(`msg-${redemptionId}`, redemptionId, { rewardId, rewardTitle, userInput }));
+        await flush();
+        await Promise.all(pending.splice(0));
+    }
 });
 
-test('connect finds the channel rewards by title instead of creating them', async () => {
+test('connect does not change channel reward settings', async () => {
     const updated: Array<{ id: string; cost?: number; prompt?: string; isPaused?: boolean; isEnabled?: boolean; skipRequestQueue?: boolean }> = [];
     const { connection } = await savedTokenConnection({
         twitch: {
             async listRewards() {
                 return {
                     rewards: [
-                        { id: 'add-existing', title: 'Добавить питомца в IDE' },
+                        { id: 'add-existing', title: 'Добавить кота в IDE' },
                         { id: 'remove-existing', title: 'Удалить питомца из IDE' },
                     ],
                 };
@@ -1585,7 +1701,7 @@ test('connecting does not pause or unpause rewards', async () => {
             async listRewards() {
                 return {
                     rewards: [
-                        { id: 'reward-1', title: 'Добавить питомца в IDE' },
+                        { id: 'reward-1', title: 'Добавить кота в IDE' },
                         { id: 'reward-2', title: 'Удалить питомца из IDE' },
                     ],
                 };
@@ -1646,7 +1762,7 @@ test('stream.offline does not pause rewards', async () => {
             async listRewards() {
                 return {
                     rewards: [
-                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'add-id', title: 'Добавить кота в IDE' },
                         { id: 'remove-id', title: 'Удалить питомца из IDE' },
                     ],
                 };
@@ -1683,7 +1799,7 @@ test('stream.online does not unpause rewards', async () => {
             async listRewards() {
                 return {
                     rewards: [
-                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'add-id', title: 'Добавить кота в IDE' },
                         { id: 'remove-id', title: 'Удалить питомца из IDE' },
                     ],
                 };
@@ -1726,7 +1842,7 @@ test('disconnect keeps the saved token and does not pause rewards', async () => 
             async listRewards() {
                 return {
                     rewards: [
-                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'add-id', title: 'Добавить кота в IDE' },
                         { id: 'remove-id', title: 'Удалить питомца из IDE' },
                     ],
                 };
@@ -1755,7 +1871,7 @@ test('closing the window does not pause rewards', async () => {
             async listRewards() {
                 return {
                     rewards: [
-                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'add-id', title: 'Добавить кота в IDE' },
                         { id: 'remove-id', title: 'Удалить питомца из IDE' },
                     ],
                 };
@@ -1776,58 +1892,6 @@ test('closing the window does not pause rewards', async () => {
     assert.deepEqual(paused, []);
 });
 
-test('finding rewards does not change them, and redemptions are still settled', async () => {
-    const errors: string[] = [];
-    const rewardUpdates: string[] = [];
-    const redemptions: string[] = [];
-    const sockets: FakeSocket[] = [];
-    const { connection } = await savedTokenConnection({
-
-        notify: {
-            showCode() {
-                throw new Error('unexpected code');
-            },
-            showError(message) {
-                errors.push(message);
-            },
-        },
-        twitch: {
-            async listRewards() {
-                return {
-                    rewards: [
-                        { id: 'foreign-add', title: 'Добавить питомца в IDE' },
-                        { id: 'remove-id', title: 'Удалить питомца из IDE' },
-                    ],
-                };
-            },
-            async updateReward(input) {
-                rewardUpdates.push(input.id);
-                if (input.id === 'foreign-add') {
-                    return { forbidden: true as const };
-                }
-                return { ok: true as const };
-            },
-            async updateRedemption(input) {
-                redemptions.push(input.rewardId);
-            },
-        },
-        openSocket(url) {
-            const socket = new FakeSocket(url);
-            sockets.push(socket);
-            return socket;
-        },
-    });
-
-    await connection.connect('startup');
-    sockets[0].receive(sessionWelcome('session-1'));
-    await flush();
-    await connection.settleRedemption('redemption-1', 'foreign-add', 'FULFILLED');
-    await connection.settleRedemption('redemption-2', 'remove-id', 'CANCELED');
-
-    assert.deepEqual(errors, []);
-    assert.deepEqual(rewardUpdates, []);
-    assert.deepEqual(redemptions, ['foreign-add', 'remove-id']);
-});
 
 test('a channel without channel points is told that Twitch features are unavailable', async () => {
     const errors: string[] = [];
@@ -1904,7 +1968,7 @@ test('a dropped socket does not pause rewards before it reconnects', async () =>
             async listRewards() {
                 return {
                     rewards: [
-                        { id: 'add-id', title: 'Добавить питомца в IDE' },
+                        { id: 'add-id', title: 'Добавить кота в IDE' },
                         { id: 'remove-id', title: 'Удалить питомца из IDE' },
                     ],
                 };
@@ -1950,43 +2014,6 @@ test('connect does not write reward costs onto the channel', async () => {
     assert.deepEqual(costs, []);
 });
 
-test('settling a redemption tells Twitch whether it was fulfilled or refunded', async () => {
-    const updates: Array<{ redemptionId: string; rewardId: string; status: string; broadcasterUserId: string; accessToken: string }> = [];
-    const { connection } = await savedTokenConnection({
-        twitch: {
-            async updateRedemption(input) {
-                updates.push({
-                    redemptionId: input.redemptionId,
-                    rewardId: input.rewardId,
-                    status: input.status,
-                    broadcasterUserId: input.broadcasterUserId,
-                    accessToken: input.accessToken,
-                });
-            },
-        },
-    });
-
-    await connection.connect('startup');
-    await connection.settleRedemption('redemption-1', 'add-id', 'CANCELED');
-    await connection.settleRedemption('redemption-2', 'add-id', 'FULFILLED');
-
-    assert.deepEqual(updates, [
-        {
-            redemptionId: 'redemption-1',
-            rewardId: 'add-id',
-            status: 'CANCELED',
-            broadcasterUserId: '42',
-            accessToken: 'access-token',
-        },
-        {
-            redemptionId: 'redemption-2',
-            rewardId: 'add-id',
-            status: 'FULFILLED',
-            broadcasterUserId: '42',
-            accessToken: 'access-token',
-        },
-    ]);
-});
 
 test('a failed startup retries on the reconnect schedule', async () => {
     const secrets = memorySecrets();
@@ -2150,16 +2177,13 @@ function quietSession() {
         async listRewards() {
             return {
                 rewards: [
-                    { id: 'add-id', title: 'Добавить питомца в IDE' },
+                    { id: 'add-id', title: 'Добавить кота в IDE' },
                     { id: 'remove-id', title: 'Удалить питомца из IDE' },
                 ],
             };
         },
         async updateReward() {
             return { ok: true as const };
-        },
-        async updateRedemption() {
-            throw new Error('unexpected redemption update');
         },
     };
 }
@@ -2208,7 +2232,11 @@ class FakeSocket {
     }
 }
 
-function redemptionNotification(messageId: string, redemptionId: string) {
+function redemptionNotification(messageId: string, redemptionId: string, overrides: {
+    rewardId?: string;
+    rewardTitle?: string;
+    userInput?: string;
+} = {}) {
     return {
         metadata: {
             message_id: messageId,
@@ -2229,10 +2257,10 @@ function redemptionNotification(messageId: string, redemptionId: string) {
                 user_id: '99',
                 user_login: 'viewer',
                 user_name: 'Viewer',
-                user_input: 'Cat, Black',
+                user_input: overrides.userInput ?? 'Cat, Black',
                 reward: {
-                    id: 'reward-1',
-                    title: 'Add a pet',
+                    id: overrides.rewardId ?? 'reward-1',
+                    title: overrides.rewardTitle ?? 'Add a pet',
                     cost: 1000,
                     prompt: '',
                 },

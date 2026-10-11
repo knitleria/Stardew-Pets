@@ -35,9 +35,9 @@ Someone watching the Farmer's Twitch stream, identified by their Twitch account.
 _Avoid_: User, chatter, subscriber
 
 **Reward**:
-A Twitch channel points reward the extension puts on the Farmer's channel. There are two: one adds a Pet to the farm, one takes one of the Viewer's own Pets away.
+A Twitch channel points reward the Farmer chooses to offer on their channel. Each Specie has its own optional add Reward, and an optional removal Reward takes one of the Viewer's own Pets away.
 _Avoid_: Prize, product, item
 
 **Redemption**:
-A Viewer spending channel points on a Reward. Each Redemption is either honoured or refunded; there is nothing in between.
+A Viewer spending channel points on a Reward. The Pet request is honoured or rejected on the farm; the Farmer completes or refunds the Redemption in Twitch.
 _Avoid_: Purchase, order, request

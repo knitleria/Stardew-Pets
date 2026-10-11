@@ -5,19 +5,18 @@ import { honourRemovePet, type SavedPet } from '../src/twitch/remove-pet.ts';
 import type { Redemption } from '../src/twitch/connection.ts';
 
 test('a viewer with several pets loses a random one of their own', async () => {
-    const { pets, greetings, settled, farm, desk } = farmWith([
+    const { pets, greetings, farm } = farmWith([
         { name: 'First', specie: 'Cat', color: 'Black', twitchUserId: '99' },
         { name: 'Second', specie: 'Dog', color: 'Brown', twitchUserId: '99' },
     ]);
     const logs: string[] = [];
 
-    await honourRemovePet(redemption(), farm, desk, () => 0.99, message => logs.push(message));
+    await honourRemovePet(redemption(), farm, () => 0.99, message => logs.push(message));
 
     assert.deepEqual(pets, [
         { name: 'First', specie: 'Cat', color: 'Black', twitchUserId: '99' },
     ]);
     assert.deepEqual(greetings, ['Bye Second!']);
-    assert.deepEqual(settled, ['FULFILLED']);
     assert.deepEqual(logs, [
         'removing Pet Second (Dog, Brown) for Viewer (viewer)',
         'removed Pet Second (Dog, Brown) for Viewer (viewer)',
@@ -25,13 +24,13 @@ test('a viewer with several pets loses a random one of their own', async () => {
 });
 
 test('another viewer and the farmer keep their pets', async () => {
-    const { pets, farm, desk } = farmWith([
+    const { pets, farm } = farmWith([
         { name: 'Barn', specie: 'Cat', color: 'Black' },
         { name: 'Other', specie: 'Dog', color: 'Brown', twitchUserId: '7' },
         { name: 'Mine', specie: 'Turtle', color: 'Green', twitchUserId: '99' },
     ]);
 
-    await honourRemovePet(redemption(), farm, desk, () => 0);
+    await honourRemovePet(redemption(), farm, () => 0);
 
     assert.deepEqual(pets, [
         { name: 'Barn', specie: 'Cat', color: 'Black' },
@@ -39,99 +38,68 @@ test('another viewer and the farmer keep their pets', async () => {
     ]);
 });
 
-test('a viewer with no pets of their own is refunded without a goodbye', async () => {
+test('a viewer with no Pets gets a manual-refund reminder without a goodbye', async () => {
     const existing = [
         { name: 'Barn', specie: 'Cat', color: 'Black' },
         { name: 'Other', specie: 'Dog', color: 'Brown', twitchUserId: '7' },
     ];
-    const { pets, greetings, settled, farm, desk } = farmWith(existing);
+    const { pets, greetings, farm } = farmWith(existing);
     const logs: string[] = [];
 
-    await honourRemovePet(redemption(), farm, desk, Math.random, message => logs.push(message));
+    await honourRemovePet(redemption(), farm, Math.random, message => logs.push(message));
 
     assert.deepEqual(pets, existing);
     assert.deepEqual(greetings, []);
-    assert.deepEqual(settled, ['CANCELED']);
-    assert.deepEqual(logs, ['remove canceled for Viewer (viewer): Viewer has no Pets']);
+    assert.deepEqual(logs, ['remove rejected for Viewer (viewer): Viewer has no Pets; manual refund required in Twitch']);
 });
 
 test('a redemption of another reward is left alone', async () => {
-    const { pets, greetings, settled, farm, desk } = farmWith([
-        { name: 'Mine', specie: 'Cat', color: 'Black', twitchUserId: '99' },
-    ]);
-
-    await honourRemovePet(redemption({ rewardTitle: 'Добавить питомца в IDE' }), farm, desk);
-
-    assert.equal(pets.length, 1);
-    assert.deepEqual(greetings, []);
-    assert.deepEqual(settled, []);
-});
-
-test('a pet stays when Twitch refuses to fulfill the removal', async () => {
     const { pets, greetings, farm } = farmWith([
         { name: 'Mine', specie: 'Cat', color: 'Black', twitchUserId: '99' },
     ]);
 
-    await assert.rejects(
-        () => honourRemovePet(redemption(), farm, {
-            async settle() {
-                throw new Error('Twitch request failed (403).');
-            },
-        }),
-        /403/,
-    );
+    await honourRemovePet(redemption({ rewardTitle: 'Добавить кота в IDE' }), farm);
 
-    assert.equal(pets[0]?.name, 'Mine');
+    assert.equal(pets.length, 1);
     assert.deepEqual(greetings, []);
 });
 
-test('a pet that is no longer on the farm is refunded', async () => {
-    const { greetings, settled, farm, desk } = farmWith([
+
+test('a Pet that is no longer on the farm is rejected', async () => {
+    const { greetings, farm } = farmWith([
         { name: 'Mine', specie: 'Cat', color: 'Black', twitchUserId: '99' },
     ]);
     farm.remove = () => false;
 
-    await honourRemovePet(redemption(), farm, desk);
+    await honourRemovePet(redemption(), farm);
 
     assert.deepEqual(greetings, []);
-    assert.deepEqual(settled, ['CANCELED']);
 });
 
 test('what the viewer typed does not choose which pet leaves', async () => {
-    const { pets, greetings, farm, desk } = farmWith([
+    const { pets, greetings, farm } = farmWith([
         { name: 'Mine', specie: 'Cat', color: 'Black', twitchUserId: '99' },
     ]);
 
-    await honourRemovePet(redemption({ userInput: 'dog, brown' }), farm, desk);
+    await honourRemovePet(redemption({ userInput: 'dog, brown' }), farm);
 
     assert.equal(pets.length, 0);
     assert.deepEqual(greetings, ['Bye Mine!']);
 });
 
-test('a Twitch error while removing a pet refunds the points', async () => {
-    const { pets, greetings, settled, farm } = farmWith([
+test('a failed removal save keeps the Pet and has no goodbye', async () => {
+    const { pets, greetings, farm } = farmWith([
         { name: 'Mine', specie: 'Cat', color: 'Black', twitchUserId: '99' },
     ]);
+    farm.remove = () => { throw new Error('save failed'); };
 
-    await assert.rejects(
-        () => honourRemovePet(redemption(), farm, {
-            async settle(status) {
-                settled.push(status);
-                if (status === 'FULFILLED') {
-                    throw new Error('Twitch request failed (503).');
-                }
-            },
-        }),
-        /503/,
-    );
-
+    await assert.rejects(() => honourRemovePet(redemption(), farm), /save failed/);
     assert.equal(pets[0]?.name, 'Mine');
     assert.deepEqual(greetings, []);
-    assert.deepEqual(settled, ['FULFILLED', 'CANCELED']);
 });
 
-test('an error before a pet is removed refunds the points', async () => {
-    const { greetings, settled, desk } = farmWith([]);
+test('an unreadable save is reported without a goodbye', async () => {
+    const { greetings } = farmWith([]);
     const farm = {
         pets() {
             throw new Error('save unreadable');
@@ -148,12 +116,11 @@ test('an error before a pet is removed refunds the points', async () => {
     };
 
     await assert.rejects(
-        () => honourRemovePet(redemption(), farm, desk),
+        () => honourRemovePet(redemption(), farm),
         /save unreadable/,
     );
 
     assert.deepEqual(greetings, []);
-    assert.deepEqual(settled, ['CANCELED']);
 });
 
 test('a freed slot counts toward the viewer limit immediately', async () => {
@@ -163,17 +130,16 @@ test('a freed slot counts toward the viewer limit immediately', async () => {
         color: 'Black',
         twitchUserId: '99',
     }));
-    const { pets, settled, farm, desk } = farmWith(existing);
+    const { pets, farm } = farmWith(existing);
 
-    await honourRemovePet(redemption(), farm, desk, () => 0);
+    await honourRemovePet(redemption(), farm, () => 0);
     await honourAddPet(redemption({
-        rewardTitle: 'Добавить питомца в IDE',
-        userInput: 'cat, black',
+        rewardTitle: 'Добавить кота в IDE',
+        userInput: 'black',
         userName: 'Viewer',
-    }), farm, desk, { Cat: ['Black'] });
+    }), farm, { Cat: ['Black'] });
 
     assert.equal(pets.length, 10);
-    assert.equal(settled.at(-1), 'FULFILLED');
 });
 
 function redemption(overrides: Partial<Redemption> = {}): Redemption {
@@ -192,11 +158,9 @@ function redemption(overrides: Partial<Redemption> = {}): Redemption {
 
 function farmWith(pets: SavedPet[]) {
     const greetings: string[] = [];
-    const settled: Array<'FULFILLED' | 'CANCELED'> = [];
     return {
         pets,
         greetings,
-        settled,
         farm: {
             pets() {
                 return pets;
@@ -214,11 +178,6 @@ function farmWith(pets: SavedPet[]) {
             },
             greet(text: string) {
                 greetings.push(text);
-            },
-        },
-        desk: {
-            async settle(status: 'FULFILLED' | 'CANCELED') {
-                settled.push(status);
             },
         },
     };

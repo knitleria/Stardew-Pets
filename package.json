@@ -181,13 +181,15 @@
         }
     },
     "scripts": {
-        "vscode:prepublish": "npm run build-game && npm run compile",
+        "vscode:prepublish": "npm run build-all && npm run compile",
         "watch": "tsc -watch -p ./",
         "compile": "tsc -p ./ --noEmit && tsc -p tsconfig.test.json --noEmit",
         "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/**/*.test.ts",
         "build-extension": "esbuild src/extension.ts --bundle --platform=node --outfile=out/extension.js --external:vscode",
         "build-game": "esbuild src/game/main.ts --bundle --outfile=media/main.js --minify",
-        "build-all": "npm run build-extension && npm run build-game"
+        "build-all": "npm run build-extension && npm run build-game",
+        "package:vsix": "mkdir -p releases && vsce package --no-dependencies --out releases/stardew-pets.vsix",
+        "run": "npm run package:vsix && \"/Applications/Cursor.app/Contents/Resources/app/bin/cursor\" --install-extension releases/stardew-pets.vsix --force"
     },
     "devDependencies": {
         "@types/node": "20.x",
@@ -195,6 +197,7 @@
         "@types/vscode-webview": "^1.57.5",
         "@vscode/test-cli": "^0.0.9",
         "@vscode/test-electron": "^2.4.0",
+        "@vscode/vsce": "3.9.2",
         "esbuild": "^0.28.1",
         "typescript": "^5.4.5"
     },
