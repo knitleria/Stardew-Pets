@@ -67,22 +67,18 @@ export function startTwitch(context: vscode.ExtensionContext, lockDir: string, f
             return;
         }
         const redemption = event.redemption;
-        const desk = {
-            settle(status: 'FULFILLED' | 'CANCELED') {
-                return connection.settleRedemption(redemption.id, redemption.rewardId, status);
-            },
-        };
         const log = (message: string) => {
             const line = `Twitch: ${message}`;
             output.appendLine(line);
             console.log(line);
         };
-        void honourAddPet(redemption, farm, desk, petSpecies, Math.random, log).catch(error => reportRedemption(redemption.userName, error));
-        void honourRemovePet(redemption, farm, desk, Math.random, log).catch(error => reportRedemption(redemption.userName, error));
+        void honourAddPet(redemption, farm, petSpecies, Math.random, log).catch(error => reportRedemption(redemption.userName, error));
+        void honourRemovePet(redemption, farm, Math.random, log).catch(error => reportRedemption(redemption.userName, error));
     });
 
     function reportRedemption(viewerName: string, error: unknown) {
-        const message = error instanceof Error ? error.message : 'Twitch redemption failed.';
+        const detail = error instanceof Error ? error.message : 'Twitch redemption failed.';
+        const message = `${detail}; manual refund required in Twitch`;
         const line = `Twitch: Redemption for ${viewerName} failed: ${message}`;
         output.appendLine(line);
         console.error(line);

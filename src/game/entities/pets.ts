@@ -520,9 +520,6 @@ export class PetAI extends AI {
     #moodHideTimeout: Timeout = new Timeout(() => this.#moodShow = false);
     #moodHeartTimeout: Timeout = new Timeout(() => this.#setRandomMood());
 
-    get moodElevation(): number { return this.#moodElevation; }
-
-
     //State
     constructor(config: any) {
         super(config);
@@ -640,6 +637,8 @@ export class PetCharacter extends Character<PetAI> {
 
     //Name plate
     static nameGap: number = 2;
+    static #nameplateAlphaCanvas: HTMLCanvasElement = document.createElement('canvas');
+    static #nameplateTopInsets: Map<string, number> = new Map();
     #nameplate: HTMLSpanElement = document.createElement('span');
 
 
@@ -704,9 +703,9 @@ export class PetCharacter extends Character<PetAI> {
         this.#nameplate.hidden = !show || !this.name;
         if (this.#nameplate.hidden) return;
 
-        //Convert the pet's game coordinates into unscaled screen coordinates
+        //Anchor the name plate above the visible sprite, not its transparent frame padding
         const xAnchor = Math.round((this.pos.x + this.size.x / 2) * Game.scale);
-        const yAnchor = Math.round((this.pos.y + this.ai.moodElevation - PetCharacter.nameGap) * Game.scale);
+        const yAnchor = Math.round((this.pos.y + this.#visibleTopInset() - PetCharacter.nameGap) * Game.scale);
 
         //Keep the complete name plate on screen and on whole pixels
         const width = this.#nameplate.offsetWidth;
@@ -724,6 +723,38 @@ export class PetCharacter extends Character<PetAI> {
 
         this.#nameplate.style.left = `${left}px`;
         this.#nameplate.style.top = `${top}px`;
+    }
+
+    #visibleTopInset(): number {
+        //The image may still be loading on the first frame; retry on the next one
+        if (!this.image.complete || !this.image.naturalWidth) return 0;
+
+        const sourceX = this.spriteSheetOffset.x + this.spriteOffset.x;
+        const sourceY = this.spriteSheetOffset.y + this.spriteOffset.y;
+        const width = this.size.x;
+        const height = this.size.y;
+        const key = `${this.image.src}:${sourceX},${sourceY}:${width}x${height}`;
+        const cached = PetCharacter.#nameplateTopInsets.get(key);
+        if (cached !== undefined) return cached;
+
+        const canvas = PetCharacter.#nameplateAlphaCanvas;
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return 0;
+        ctx.drawImage(this.image, sourceX, sourceY, width, height, 0, 0, width, height);
+        const pixels = ctx.getImageData(0, 0, width, height).data;
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                if (pixels[(y * width + x) * 4 + 3] === 0) continue;
+                PetCharacter.#nameplateTopInsets.set(key, y);
+                return y;
+            }
+        }
+
+        //An empty frame has no visible top to align with
+        PetCharacter.#nameplateTopInsets.set(key, 0);
+        return 0;
     }
 
     //Movement

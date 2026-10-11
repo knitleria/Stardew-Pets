@@ -85,14 +85,6 @@ export type TwitchApi = {
         broadcasterUserId: string;
     }): Promise<{ rewards: ManagedReward[] } | { forbidden: true }>;
     updateReward(input: RewardUpdateInput): Promise<{ ok: true } | { forbidden: true }>;
-    updateRedemption(input: {
-        clientId: string;
-        accessToken: string;
-        broadcasterUserId: string;
-        rewardId: string;
-        redemptionId: string;
-        status: 'FULFILLED' | 'CANCELED';
-    }): Promise<void>;
 };
 
 export type TwitchSocket = {
@@ -119,7 +111,6 @@ export type TwitchConnection = {
     connect(reason: ConnectReason): Promise<void>;
     disconnect(): Promise<void>;
     onEvent(listener: (event: TwitchEvent) => void): () => void;
-    settleRedemption(redemptionId: string, rewardId: string, status: 'FULFILLED' | 'CANCELED'): Promise<void>;
     dispose(): void;
 };
 
@@ -139,8 +130,6 @@ const TOKEN_KEY = twitchTokenKey;
 const SCOPE = 'channel:manage:redemptions';
 const EVENTSUB_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const REFRESH_LEEWAY_MS = 60_000;
-export const addPetRewardTitle = 'Добавить питомца в IDE';
-export const removePetRewardTitle = 'Удалить питомца из IDE';
 const CHANNEL_POINTS_UNAVAILABLE = 'Twitch channel points are only available for Affiliate and Partner channels.';
 
 export function createTwitchConnection(dependencies: TwitchDependencies): TwitchConnection {
@@ -206,16 +195,6 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             return () => {
                 listeners.delete(listener);
             };
-        },
-        settleRedemption(redemptionId, rewardId, status) {
-            return dependencies.twitch.updateRedemption({
-                clientId: dependencies.clientId,
-                accessToken: socketAccessToken,
-                broadcasterUserId,
-                rewardId,
-                redemptionId,
-                status,
-            });
         },
         dispose() {
             log('window closed, disconnected');
@@ -311,7 +290,7 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         try {
             const user = await dependencies.twitch.currentUser(dependencies.clientId, tokens.accessToken);
             broadcasterUserId = user.id;
-            if (!await bindRewards()) {
+            if (!await checkChannelPoints()) {
                 return;
             }
             activeSocket = dependencies.openSocket(EVENTSUB_URL);
@@ -466,7 +445,7 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
         });
     }
 
-    async function bindRewards(): Promise<boolean> {
+    async function checkChannelPoints(): Promise<boolean> {
         const listed = await dependencies.twitch.listRewards({
             clientId: dependencies.clientId,
             accessToken: socketAccessToken,
@@ -476,19 +455,7 @@ export function createTwitchConnection(dependencies: TwitchDependencies): Twitch
             denyChannelPoints();
             return false;
         }
-        await bindReward(addPetRewardTitle, listed.rewards);
-        await bindReward(removePetRewardTitle, listed.rewards);
         return true;
-    }
-
-    function bindReward(title: string, existing: ManagedReward[]) {
-        const found = existing.find(reward => reward.title === title);
-        if (found === undefined) {
-            log(`reward not found: ${title}`);
-            dependencies.notify.showError(`A Twitch reward named "${title}" was not found. Create it on the channel, then Connect again.`);
-            return;
-        }
-        log(`reward found: ${title}`);
     }
 
     function denyChannelPoints() {
